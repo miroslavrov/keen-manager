@@ -55,6 +55,11 @@ jobs:
       - name: Test
         run: make test
 
+      # Headless smoke test: render every tab and assert none trips an error
+      # boundary (the regression guard for the blank-tabs bug).
+      - name: Web smoke tests
+        run: cd web && npm test
+
       # Sanity check that every router target still cross-compiles.
       - name: Cross-compile all targets
         run: make build-all
