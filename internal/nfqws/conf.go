@@ -80,3 +80,25 @@ func (c *Controller) SetModeOnDisk(mode model.NfqwsMode) error {
 	}
 	return c.WriteConfigRaw(SetMode(raw, mode))
 }
+
+// Conf reads and parses nfqws2.conf into a structured Conf for the UI's typed
+// controls (ports, interface, policy, custom args, …).
+func (c *Controller) Conf() (Conf, error) {
+	raw, err := c.ReadConfigRaw()
+	if err != nil {
+		return Conf{}, err
+	}
+	return ParseConf(raw)
+}
+
+// SaveConf renders nc back over the existing nfqws2.conf — updating only the
+// keys that changed and preserving comments, ordering, the big multiline
+// strategy blocks and any keys keen-manager does not model — then writes it
+// (a .keen.bak backup is taken first). It does not restart the service.
+func (c *Controller) SaveConf(nc Conf) error {
+	raw, err := c.ReadConfigRaw()
+	if err != nil {
+		return err
+	}
+	return c.WriteConfigRaw(nc.Render(raw))
+}
