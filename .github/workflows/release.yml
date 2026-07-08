@@ -51,3 +51,48 @@ jobs:
             build/sha256sums.txt
           generate_release_notes: true
           fail_on_unmatched_files: true
+          # Any tag with a hyphen (v0.1.0-beta.1) is a pre-release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            ## keen-manager ${{ github.ref_name }}
+
+            Unified VPN (Xray / AmneziaWG) + DPI-bypass (nfqws2) manager for Keenetic
+            routers running Entware. Single static binary with an embedded web UI and CLI.
+
+            ---
+
+            ### Установка / Install (Entware, one-liner)
+
+            ```sh
+            opkg update && opkg install curl
+            curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/install.sh | sh
+            ```
+
+            The installer auto-detects your router architecture (mipsle / mips / arm64 / arm),
+            downloads the matching binary below, installs the init script, and starts the
+            daemon. Then open the web UI at **http://ROUTER_IP:8088**.
+
+            Установщик сам определит архитектуру роутера, скачает нужный бинарь,
+            поставит init-скрипт и запустит демон. Веб-интерфейс — **http://IP_РОУТЕРА:8088**.
+
+            ### Обновление / Upgrade
+
+            Re-run the install command above — it replaces the binary atomically and restarts.
+            Повторно запусти команду установки — бинарь заменится атомарно, демон перезапустится.
+
+            ### Удаление / Uninstall
+
+            ```sh
+            curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/uninstall.sh | sh
+            ```
+
+            ### Проверка целостности / Verify
+
+            ```sh
+            sha256sum -c sha256sums.txt
+            ```
+
+            > ⚠️ **Beta.** Transparent-proxy (TPROXY) and kill-switch are **opt-in** and
+            > **off by default** — installing does not touch your router's firewall until you
+            > enable them. Bypassed ranges keep the LAN and router reachable even if a tunnel
+            > breaks. Report issues on the repo.
