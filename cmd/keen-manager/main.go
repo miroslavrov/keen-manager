@@ -40,6 +40,18 @@ func main() {
 		cmdNfqws(rest)
 	case "route":
 		cmdRoute(rest)
+	case "install-hook":
+		eng := openEngine()
+		if err := eng.InstallHook(); err != nil {
+			fatal("install-hook: %v", err)
+		}
+		fmt.Println("ndm netfilter hook installed")
+	case "uninstall-hook":
+		eng := openEngine()
+		if err := eng.UninstallHook(); err != nil {
+			fatal("uninstall-hook: %v", err)
+		}
+		fmt.Println("ndm netfilter hook removed")
 	case "version", "-v", "--version":
 		fmt.Println(version.String())
 	case "help", "-h", "--help":
@@ -73,6 +85,8 @@ COMMANDS:
   nfqws mode <MODE_AUTO|MODE_LIST|MODE_ALL>
                                set the nfqws2 mode
   route reapply                re-install transparent-proxy rules (ndm hook)
+  install-hook                 install the ndm netfilter.d hook (done by installer)
+  uninstall-hook               remove the ndm netfilter.d hook
   version                      print the version
 
 ENVIRONMENT:

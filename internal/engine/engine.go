@@ -122,6 +122,34 @@ func (e *Engine) Stop() {
 // Logf records a keen-manager log line (also fanned out over SSE).
 func (e *Engine) Logf(format string, args ...any) { e.logs.appendf(format, args...) }
 
+// HookName is the ndm netfilter.d hook filename (contains "keen-manager" so the
+// uninstaller's glob finds it).
+const HookName = "50-keen-manager"
+
+// InstallHook writes the ndm netfilter.d hook that reapplies keen-manager's
+// routing rules whenever KeeneticOS rebuilds iptables on a topology change.
+func (e *Engine) InstallHook() error {
+	binPath, err := os.Executable()
+	if err != nil || binPath == "" {
+		binPath = filepath.Join(e.Paths.Root, "bin", "keen-manager")
+	}
+	dir := filepath.Join(e.Paths.NdmDir, "netfilter.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	hookPath := filepath.Join(dir, HookName)
+	if err := os.WriteFile(hookPath, []byte(route.HookScript(binPath)), 0o755); err != nil {
+		return err
+	}
+	e.Logf("installed ndm netfilter hook -> %s", hookPath)
+	return nil
+}
+
+// UninstallHook removes the ndm netfilter.d hook (best-effort).
+func (e *Engine) UninstallHook() error {
+	return os.Remove(filepath.Join(e.Paths.NdmDir, "netfilter.d", HookName))
+}
+
 // ReapplyRoutes re-installs the transparent-proxy rules. It is invoked by the
 // ndm netfilter.d hook (via `keen-manager route reapply`) after KeeneticOS
 // rebuilds iptables on a topology change. Only meaningful when an Xray
