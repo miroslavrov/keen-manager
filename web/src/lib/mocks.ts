@@ -13,7 +13,6 @@ import type {
   LogResponse,
   Nfqws,
   NfqwsConfig,
-  NfqwsList,
   Server,
   Settings,
   Sub,
