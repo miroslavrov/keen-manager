@@ -1,0 +1,36 @@
+keen-manager
+Copyright (c) 2026 miroslavrov
+Licensed under the MIT License (see LICENSE).
+
+================================================================================
+Acknowledgements & third-party components
+================================================================================
+
+keen-manager is an ORCHESTRATOR. It manages proven, independently distributed
+components rather than re-bundling them. This keeps licensing clean and lets each
+component be updated from its own upstream.
+
+Design and integration were informed by these MIT-licensed projects. keen-manager
+is an independent work and is not endorsed by their authors:
+
+  - hoaxisr/awg-manager            (MIT) — AmneziaWG management on Keenetic
+    https://github.com/hoaxisr/awg-manager
+  - nfqws/nfqws2-keenetic          (MIT) — nfqws2 packaging for Keenetic/Entware
+    https://github.com/nfqws/nfqws2-keenetic
+  - nfqws/nfqws-keenetic-web       (MIT) — web UI for nfqws
+    https://github.com/nfqws/nfqws-keenetic-web
+
+Components that keen-manager DRIVES but does NOT redistribute (installed from
+their own upstreams by the installer, under their own terms):
+
+  - nfqws2 daemon + Lua engine — from bol-van/zapret2. Upstream ships without an
+    explicit license; keen-manager does not vendor or redistribute these binaries.
+    It installs/updates the `nfqws2-keenetic` opkg package and drives it.
+  - AmneziaWG kernel modules / userspace (amneziawg-go, amneziawg-tools) — the
+    kernel modules derive from WireGuard/AmneziaWG and are effectively GPLv2.
+    keen-manager does not bundle them; it uses packages present on the device.
+  - Xray-core — from XTLS/Xray-core (MPL-2.0). Installed from upstream releases,
+    not vendored here.
+
+Bundled Go dependencies:
+  - gopkg.in/yaml.v3 (MIT / Apache-2.0 dual portions) — see go.sum / module cache.

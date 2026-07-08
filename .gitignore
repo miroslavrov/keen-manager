@@ -1,0 +1,27 @@
+# Build output
+/build/
+/dist/
+*.ipk
+*.tar.gz
+
+# Go
+/gopath/
+/gocache/
+*.test
+*.out
+
+# Frontend
+web/node_modules/
+web/.vite/
+web/*.local
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Secrets (never commit)
+.gh_token
+*.pem
+*.key.local

@@ -1,0 +1,166 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme — clean neutral surfaces */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 6%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 6%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 6%;
+
+    --primary: 158 64% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 10%;
+
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 46%;
+
+    --accent: 240 5% 94%;
+    --accent-foreground: 240 6% 10%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 158 64% 40%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 12%;
+
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 158 64% 40%;
+
+    --radius: 0.55rem;
+
+    --sidebar: 240 5% 98%;
+    --sidebar-foreground: 240 5% 26%;
+    --sidebar-border: 240 6% 90%;
+    --sidebar-accent: 240 5% 94%;
+  }
+
+  .dark {
+    /* Dark theme — zinc appliance console */
+    --background: 240 10% 4%;
+    --foreground: 0 0% 96%;
+
+    --card: 240 9% 7%;
+    --card-foreground: 0 0% 96%;
+
+    --popover: 240 9% 6%;
+    --popover-foreground: 0 0% 96%;
+
+    --primary: 152 60% 46%;
+    --primary-foreground: 152 80% 6%;
+
+    --secondary: 240 5% 13%;
+    --secondary-foreground: 0 0% 92%;
+
+    --muted: 240 5% 12%;
+    --muted-foreground: 240 5% 60%;
+
+    --accent: 240 5% 15%;
+    --accent-foreground: 0 0% 96%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 152 60% 46%;
+    --success-foreground: 152 80% 6%;
+
+    --warning: 38 95% 55%;
+    --warning-foreground: 38 95% 8%;
+
+    --border: 240 5% 15%;
+    --input: 240 5% 17%;
+    --ring: 152 60% 46%;
+
+    --sidebar: 240 10% 5%;
+    --sidebar-foreground: 240 5% 65%;
+    --sidebar-border: 240 5% 13%;
+    --sidebar-accent: 240 5% 12%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    font-feature-settings: 'cv11', 'ss01';
+    font-variation-settings: 'opsz' 32;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Refined scrollbars for the console feel */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@layer components {
+  /* Skeleton shimmer used by loading states */
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .skeleton-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--foreground) / 0.06),
+      transparent
+    );
+    animation: shimmer 1.6s infinite;
+  }
+
+  /* Subtle grid backdrop for the app shell */
+  .app-grid-bg {
+    background-image:
+      radial-gradient(
+        hsl(var(--foreground) / 0.035) 1px,
+        transparent 1px
+      );
+    background-size: 22px 22px;
+  }
+}
+
+/* Focus visibility — accessible rings everywhere */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
