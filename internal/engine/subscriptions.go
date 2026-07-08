@@ -83,7 +83,9 @@ func (e *Engine) CreateSubscription(name, url string) (SubView, error) {
 	subID := newID("sub")
 	sub := model.Subscription{
 		ID:             subID,
-		Name:           firstNonEmpty(name, res.Host),
+		// Prefer the user-supplied name; otherwise adopt the panel's advertised
+		// profile-title (parity with native clients), falling back to the host.
+		Name:           firstNonEmpty(name, firstNonEmpty(res.Title, res.Host)),
 		URL:            url,
 		Host:           res.Host,
 		ServerCount:    len(res.Servers),

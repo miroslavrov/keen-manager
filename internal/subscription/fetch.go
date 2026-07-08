@@ -43,6 +43,11 @@ type Result struct {
 	UserInfo *model.SubUserInfo
 	// UpdateIntervalHours from the profile-update-interval header, if present.
 	UpdateIntervalHours int
+	// Title is the panel-advertised profile name (profile-title header). Native
+	// clients (v2rayNG/Happ) display this; keen-manager uses it to auto-name a
+	// subscription when the user did not provide one. The header value may be
+	// raw text or "base64:<b64>" (base64: prefix is decoded).
+	Title string
 }
 
 // Fetch downloads a subscription URL and parses it, sweeping a set of client
@@ -138,7 +143,27 @@ func fetchOnce(ctx context.Context, client *http.Client, u *url.URL, ua string) 
 		Servers:             servers,
 		UserInfo:            parseUserInfo(resp.Header.Get("subscription-userinfo")),
 		UpdateIntervalHours: hoursFromHeaders(resp.Header),
+		Title:               titleFromHeader(resp.Header.Get("profile-title")),
 	}, false, nil
+}
+
+// titleFromHeader decodes the profile-title header. Panels emit either a raw
+// UTF-8 string or a "base64:<standard-or-url-base64>" form (the latter lets a
+// non-ASCII name survive an HTTP header); both are handled, and an undecodable
+// base64 payload degrades to an empty title rather than leaking the raw token.
+func titleFromHeader(h string) string {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return ""
+	}
+	if rest, ok := strings.CutPrefix(h, "base64:"); ok {
+		dec, err := b64lenient(rest)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(dec))
+	}
+	return h
 }
 
 // parseUserInfo parses "upload=..; download=..; total=..; expire=.." headers.
