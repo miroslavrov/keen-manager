@@ -65,11 +65,13 @@ import { useConnectionActions } from '@/hooks/use-actions'
 import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn, formatBytes, secondsAgoLabel, timeAgo } from '@/lib/utils'
+import { useT } from '@/i18n'
 import type { Conn, ConnType } from '@/lib/types'
 
 const NONE_VALUE = '__none__'
 
 export function ConnectionsPage() {
+  const t = useT()
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const actions = useConnectionActions()
@@ -94,7 +96,7 @@ export function ConnectionsPage() {
       api.updateConnection(id, body),
     onSuccess: () => invalidate(),
     onError: () =>
-      toast({ variant: 'error', title: 'Could not update connection' }),
+      toast({ variant: 'error', title: t('connections.updateError') }),
   })
 
   const deleteMutation = useMutation({
@@ -105,12 +107,14 @@ export function ConnectionsPage() {
       deleteConfirm.close()
       toast({
         variant: 'success',
-        title: 'Connection deleted',
-        description: name ? `“${name}” was removed.` : undefined,
+        title: t('connections.deleted'),
+        description: name
+          ? t('connections.deletedDesc', { name })
+          : undefined,
       })
     },
     onError: () =>
-      toast({ variant: 'error', title: 'Could not delete connection' }),
+      toast({ variant: 'error', title: t('connections.deleteError') }),
   })
 
   const list = connections ?? []
@@ -118,12 +122,12 @@ export function ConnectionsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Connections"
-        description="AmneziaWG & Xray tunnels — activate, probe, and manage fallbacks."
+        title={t('connections.title')}
+        description={t('connections.desc')}
         actions={
           <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5">
             <Plus className="h-4 w-4" />
-            Add connection
+            {t('connections.addConnection')}
           </Button>
         }
       />
@@ -137,11 +141,11 @@ export function ConnectionsPage() {
       ) : list.length === 0 ? (
         <EmptyState
           icon={Activity}
-          title="No connections configured"
-          description="Paste an AmneziaWG config or an Xray share link to add your first tunnel."
+          title={t('connections.emptyTitle')}
+          description={t('connections.emptyDesc')}
           action={
             <Button size="sm" onClick={() => setAddOpen(true)}>
-              Add connection
+              {t('connections.addConnection')}
             </Button>
           }
         />
@@ -183,13 +187,13 @@ export function ConnectionsPage() {
         open={deleteConfirm.open}
         onOpenChange={deleteConfirm.setOpen}
         destructive
-        title="Delete connection?"
+        title={t('connections.deleteTitle')}
         description={
           deleteConfirm.payload
-            ? `“${deleteConfirm.payload.name}” will be permanently removed. This cannot be undone.`
+            ? t('connections.deleteDesc', { name: deleteConfirm.payload.name })
             : undefined
         }
-        confirmLabel="Delete"
+        confirmLabel={t('common.delete')}
         loading={deleteMutation.isPending}
         onConfirm={() => {
           if (deleteConfirm.payload) {
@@ -218,11 +222,12 @@ function ConnectionRow({
   onSetFallback: (fallbackTo: string) => void
   onDelete: () => void
 }) {
+  const t = useT()
   const pendingThis =
     actions.pending && actions.pendingVars?.id === conn.id
   const fallbackName =
     conn.fallback_to === 'direct'
-      ? 'Direct WAN'
+      ? t('common.directWan')
       : allConnections.find((c) => c.id === conn.fallback_to)?.name
 
   return (
@@ -249,14 +254,14 @@ function ConnectionRow({
               {conn.active ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
                   <Radio className="h-3 w-3" />
-                  Active
+                  {t('common.active')}
                 </span>
               ) : null}
             </div>
             <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
               <MapPin className="h-3 w-3 shrink-0" />
               <span className="truncate">
-                {conn.location ?? 'Unknown location'}
+                {conn.location ?? t('common.unknownLocation')}
               </span>
             </div>
           </div>
@@ -269,7 +274,10 @@ function ConnectionRow({
               <code className="truncate rounded bg-muted/60 px-2 py-1 font-mono text-xs text-muted-foreground">
                 {conn.endpoint}
               </code>
-              <CopyButton value={conn.endpoint} label="Copy endpoint" />
+              <CopyButton
+                value={conn.endpoint}
+                label={t('connections.copyEndpoint')}
+              />
             </>
           ) : (
             <span className="text-xs text-muted-foreground">—</span>
@@ -280,7 +288,7 @@ function ConnectionRow({
         <div className="flex items-center gap-4 lg:w-40 lg:justify-end">
           <LatencyBadge ms={conn.latency_ms} />
           <span className="hidden text-xs text-muted-foreground sm:inline">
-            {conn.enabled ? timeAgo(conn.last_check) : 'Disabled'}
+            {conn.enabled ? timeAgo(conn.last_check) : t('common.disabled')}
           </span>
         </div>
 
@@ -290,7 +298,10 @@ function ConnectionRow({
             <Switch
               checked={conn.enabled}
               onCheckedChange={onToggleEnabled}
-              aria-label={`${conn.enabled ? 'Disable' : 'Enable'} ${conn.name}`}
+              aria-label={t(
+                conn.enabled ? 'connections.disableName' : 'connections.enableName',
+                { name: conn.name },
+              )}
             />
           </div>
 
@@ -307,11 +318,11 @@ function ConnectionRow({
               ) : (
                 <Gauge className="h-3.5 w-3.5" />
               )}
-              Activate
+              {t('connections.activate')}
             </Button>
           ) : (
             <span className="hidden text-xs font-medium text-primary sm:inline">
-              Routing traffic
+              {t('common.routingTraffic')}
             </span>
           )}
 
@@ -320,7 +331,7 @@ function ConnectionRow({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Connection actions"
+                aria-label={t('connections.connectionActions')}
               >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
@@ -333,25 +344,25 @@ function ConnectionRow({
                 disabled={!conn.enabled}
               >
                 <ArrowUpCircle className="h-4 w-4" />
-                Bring up
+                {t('connections.bringUp')}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => actions.down(conn.id, conn.name)}
               >
                 <ArrowDownCircle className="h-4 w-4" />
-                Take down
+                {t('connections.takeDown')}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => actions.test(conn.id, conn.name)}
                 disabled={!conn.enabled}
               >
                 <Signal className="h-4 w-4" />
-                Test reachability
+                {t('connections.testReachability')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <div className="px-2 py-1.5">
                 <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">
-                  Fallback target
+                  {t('connections.fallbackTarget')}
                 </p>
                 <Select
                   value={conn.fallback_to ?? NONE_VALUE}
@@ -360,11 +371,15 @@ function ConnectionRow({
                   }
                 >
                   <SelectTrigger className="h-8 text-xs">
-                    <SelectValue placeholder="None" />
+                    <SelectValue placeholder={t('common.none')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={NONE_VALUE}>None</SelectItem>
-                    <SelectItem value="direct">Direct WAN</SelectItem>
+                    <SelectItem value={NONE_VALUE}>
+                      {t('common.none')}
+                    </SelectItem>
+                    <SelectItem value="direct">
+                      {t('common.directWan')}
+                    </SelectItem>
                     {allConnections
                       .filter((c) => c.id !== conn.id)
                       .map((c) => (
@@ -381,7 +396,7 @@ function ConnectionRow({
                 className="text-destructive focus:text-destructive"
               >
                 <Trash2 className="h-4 w-4" />
-                Delete
+                {t('common.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -391,7 +406,7 @@ function ConnectionRow({
       {fallbackName ? (
         <div className="border-t border-border/60 px-4 py-1.5">
           <span className="text-[11px] text-muted-foreground">
-            Falls back to{' '}
+            {t('connections.fallsBackTo')}{' '}
             <span className="font-medium text-foreground">{fallbackName}</span>
           </span>
         </div>
@@ -409,6 +424,7 @@ function AddConnectionDialog({
   onOpenChange: (open: boolean) => void
   onCreated: () => void
 }) {
+  const t = useT()
   const { toast } = useToast()
   const [type, setType] = React.useState<ConnType>('awg')
   const [name, setName] = React.useState('')
@@ -434,14 +450,14 @@ function AddConnectionDialog({
       onCreated()
       toast({
         variant: 'success',
-        title: 'Connection added',
-        description: `“${name.trim()}” is now being probed.`,
+        title: t('connections.added'),
+        description: t('connections.addedDesc', { name: name.trim() }),
       })
       reset()
       onOpenChange(false)
     },
     onError: () =>
-      toast({ variant: 'error', title: 'Could not add connection' }),
+      toast({ variant: 'error', title: t('connections.addError') }),
   })
 
   const canSubmit =
@@ -458,20 +474,18 @@ function AddConnectionDialog({
     >
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Add connection</DialogTitle>
-          <DialogDescription>
-            Import an AmneziaWG configuration or an Xray share link.
-          </DialogDescription>
+          <DialogTitle>{t('connections.addTitle')}</DialogTitle>
+          <DialogDescription>{t('connections.addDesc')}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="conn-name">Name</Label>
+            <Label htmlFor="conn-name">{t('connections.name')}</Label>
             <Input
               id="conn-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Amnezia NL-1"
+              placeholder={t('connections.namePlaceholder')}
               autoFocus
             />
           </div>
@@ -483,7 +497,7 @@ function AddConnectionDialog({
             </TabsList>
 
             <TabsContent value="awg" className="space-y-2">
-              <Label htmlFor="awg-conf">WireGuard / AmneziaWG config</Label>
+              <Label htmlFor="awg-conf">{t('connections.configLabel')}</Label>
               <Textarea
                 id="awg-conf"
                 value={awgConf}
@@ -495,13 +509,14 @@ function AddConnectionDialog({
                 spellCheck={false}
               />
               <p className="text-xs text-muted-foreground">
-                Paste the full <span className="font-mono">.conf</span> including
-                the AmneziaWG junk parameters (Jc, S1, S2, H1…).
+                {t('connections.configHintBefore')}{' '}
+                <span className="font-mono">.conf</span>
+                {t('connections.configHintAfter')}
               </p>
             </TabsContent>
 
             <TabsContent value="xray" className="space-y-2">
-              <Label htmlFor="share-link">Share link</Label>
+              <Label htmlFor="share-link">{t('connections.shareLink')}</Label>
               <Input
                 id="share-link"
                 value={shareLink}
@@ -511,7 +526,7 @@ function AddConnectionDialog({
                 spellCheck={false}
               />
               <p className="text-xs text-muted-foreground">
-                Supports VLESS, VMess, Trojan and Shadowsocks URIs.
+                {t('connections.shareLinkHint')}
               </p>
             </TabsContent>
           </Tabs>
@@ -519,7 +534,7 @@ function AddConnectionDialog({
 
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={() => createMutation.mutate()}
@@ -529,7 +544,7 @@ function AddConnectionDialog({
             {createMutation.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : null}
-            Add connection
+            {t('connections.addConnection')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -544,6 +559,7 @@ function ConnectionDetailSheet({
   id: string | null
   onOpenChange: (open: boolean) => void
 }) {
+  const t = useT()
   const { data: detail, isLoading } = useQuery({
     queryKey: ['connection', id],
     queryFn: () => api.connection(id as string),
@@ -561,11 +577,11 @@ function ConnectionDetailSheet({
                 {detail.name}
               </>
             ) : (
-              'Connection'
+              t('connections.detailFallback')
             )}
           </SheetTitle>
           <SheetDescription>
-            {detail?.protocol ?? 'Tunnel configuration & live metrics'}
+            {detail?.protocol ?? t('connections.detailDescFallback')}
           </SheetDescription>
         </SheetHeader>
 
@@ -583,14 +599,14 @@ function ConnectionDetailSheet({
                 {detail.active ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
                     <Radio className="h-3 w-3" />
-                    Active
+                    {t('common.active')}
                   </span>
                 ) : null}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <MetricTile
-                  label="Latency"
+                  label={t('connections.latency')}
                   value={
                     detail.latency_ms !== undefined
                       ? `${Math.round(detail.latency_ms)} ms`
@@ -598,12 +614,15 @@ function ConnectionDetailSheet({
                   }
                 />
                 <MetricTile
-                  label="Handshake"
+                  label={t('connections.handshake')}
                   value={secondsAgoLabel(detail.handshake_age_s)}
                 />
-                <MetricTile label="Received" value={formatBytes(detail.rx_bytes)} />
                 <MetricTile
-                  label="Transmitted"
+                  label={t('connections.received')}
+                  value={formatBytes(detail.rx_bytes)}
+                />
+                <MetricTile
+                  label={t('connections.transmitted')}
                   value={formatBytes(detail.tx_bytes)}
                 />
               </div>
@@ -611,7 +630,7 @@ function ConnectionDetailSheet({
               {detail.endpoint ? (
                 <div className="space-y-1.5">
                   <p className="text-xs font-medium text-muted-foreground">
-                    Endpoint
+                    {t('connections.endpoint')}
                   </p>
                   <div className="flex items-center gap-1">
                     <code className="flex-1 truncate rounded bg-muted/60 px-2 py-1.5 font-mono text-xs text-foreground">
@@ -626,11 +645,11 @@ function ConnectionDetailSheet({
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-medium text-muted-foreground">
-                      Config preview
+                      {t('connections.configPreview')}
                     </p>
                     <CopyButton
                       value={detail.config_preview}
-                      label="Copy config"
+                      label={t('connections.copyConfig')}
                     />
                   </div>
                   <pre className="max-h-80 overflow-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed text-foreground">
@@ -643,7 +662,9 @@ function ConnectionDetailSheet({
                 <>
                   <Separator />
                   <p className="text-xs text-muted-foreground">
-                    Last checked {timeAgo(detail.last_check)}
+                    {t('connections.lastChecked', {
+                      time: timeAgo(detail.last_check),
+                    })}
                   </p>
                 </>
               ) : null}

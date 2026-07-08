@@ -38,9 +38,11 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn, formatBytes, formatDate, pct, timeAgo } from '@/lib/utils'
+import { useT } from '@/i18n'
 import type { Server, Sub } from '@/lib/types'
 
 export function SubscriptionsPage() {
+  const t = useT()
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -59,10 +61,13 @@ export function SubscriptionsPage() {
       queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
       queryClient.invalidateQueries({ queryKey: ['subscription-servers', id] })
       queryClient.invalidateQueries({ queryKey: ['connections'] })
-      toast({ variant: 'success', title: 'Subscription refreshed' })
+      toast({ variant: 'success', title: t('subscriptions.refreshedTitle') })
     },
     onError: () =>
-      toast({ variant: 'error', title: 'Could not refresh subscription' }),
+      toast({
+        variant: 'error',
+        title: t('subscriptions.refreshErrorTitle'),
+      }),
   })
 
   const selectBestMutation = useMutation({
@@ -78,14 +83,17 @@ export function SubscriptionsPage() {
       const picked = servers?.find((s) => s.id === res.selected_id)
       toast({
         variant: 'success',
-        title: 'Selected best server',
+        title: t('subscriptions.selectedBestTitle'),
         description: picked
           ? `${picked.name} (${Math.round(picked.latency_ms ?? 0)} ms)`
           : undefined,
       })
     },
     onError: () =>
-      toast({ variant: 'error', title: 'Could not select best server' }),
+      toast({
+        variant: 'error',
+        title: t('subscriptions.selectBestErrorTitle'),
+      }),
   })
 
   const deleteMutation = useMutation({
@@ -97,12 +105,17 @@ export function SubscriptionsPage() {
       deleteConfirm.close()
       toast({
         variant: 'success',
-        title: 'Subscription removed',
-        description: name ? `“${name}” was deleted.` : undefined,
+        title: t('subscriptions.removedTitle'),
+        description: name
+          ? t('subscriptions.removedDesc', { name })
+          : undefined,
       })
     },
     onError: () =>
-      toast({ variant: 'error', title: 'Could not delete subscription' }),
+      toast({
+        variant: 'error',
+        title: t('subscriptions.removeErrorTitle'),
+      }),
   })
 
   const list = subs ?? []
@@ -110,12 +123,12 @@ export function SubscriptionsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Subscriptions"
-        description="Xray subscription feeds — server lists, data usage, and auto-selection."
+        title={t('subscriptions.title')}
+        description={t('subscriptions.desc')}
         actions={
           <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5">
             <Plus className="h-4 w-4" />
-            Add subscription
+            {t('subscriptions.addSubscription')}
           </Button>
         }
       />
@@ -129,11 +142,11 @@ export function SubscriptionsPage() {
       ) : list.length === 0 ? (
         <EmptyState
           icon={Globe}
-          title="No subscriptions"
-          description="Add a subscription URL (e.g. https://host/s/<token>) to import a fleet of Xray servers."
+          title={t('subscriptions.emptyTitle')}
+          description={t('subscriptions.emptyDesc')}
           action={
             <Button size="sm" onClick={() => setAddOpen(true)}>
-              Add subscription
+              {t('subscriptions.addSubscription')}
             </Button>
           }
         />
@@ -175,13 +188,13 @@ export function SubscriptionsPage() {
         open={deleteConfirm.open}
         onOpenChange={deleteConfirm.setOpen}
         destructive
-        title="Delete subscription?"
+        title={t('subscriptions.deleteTitle')}
         description={
           deleteConfirm.payload
-            ? `“${deleteConfirm.payload.name}” and its imported servers will be removed.`
+            ? t('subscriptions.deleteDesc', { name: deleteConfirm.payload.name })
             : undefined
         }
-        confirmLabel="Delete"
+        confirmLabel={t('common.delete')}
         loading={deleteMutation.isPending}
         onConfirm={() => {
           if (deleteConfirm.payload) {
@@ -212,6 +225,7 @@ function SubscriptionCard({
   selecting: boolean
   onDelete: () => void
 }) {
+  const t = useT()
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -234,14 +248,17 @@ function SubscriptionCard({
     },
     onError: (_err, _next, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(['subscriptions'], ctx.prev)
-      toast({ variant: 'error', title: 'Could not update auto-select best' })
+      toast({
+        variant: 'error',
+        title: t('subscriptions.autoBestErrorTitle'),
+      })
     },
     onSuccess: (updated) => {
       toast({
         variant: 'success',
         title: updated.auto_select_best
-          ? 'Auto-select best enabled'
-          : 'Auto-select best disabled',
+          ? t('subscriptions.autoBestEnabledTitle')
+          : t('subscriptions.autoBestDisabledTitle'),
       })
     },
     onSettled: () => {
@@ -275,9 +292,11 @@ function SubscriptionCard({
                 checked={sub.auto_select_best}
                 disabled={autoMutation.isPending}
                 onCheckedChange={(v) => autoMutation.mutate(v)}
-                aria-label="Auto-select best server"
+                aria-label={t('subscriptions.autoSelectAria')}
               />
-              <span className="text-xs text-muted-foreground">Auto-best</span>
+              <span className="text-xs text-muted-foreground">
+                {t('subscriptions.autoBest')}
+              </span>
             </div>
             <Button
               variant="outline"
@@ -291,7 +310,7 @@ function SubscriptionCard({
               ) : (
                 <Gauge className="h-3.5 w-3.5" />
               )}
-              Select best
+              {t('subscriptions.selectBest')}
             </Button>
             <Button
               variant="outline"
@@ -303,13 +322,13 @@ function SubscriptionCard({
               <RefreshCw
                 className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')}
               />
-              Refresh
+              {t('common.refresh')}
             </Button>
             <Button
               variant="ghost"
               size="icon-sm"
               onClick={onDelete}
-              aria-label="Delete subscription"
+              aria-label={t('subscriptions.deleteAria')}
               className="text-muted-foreground hover:text-destructive"
             >
               <Trash2 className="h-4 w-4" />
@@ -319,22 +338,24 @@ function SubscriptionCard({
 
         {/* Meta grid */}
         <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-          <Meta label="Servers" value={String(sub.server_count)} />
-          <Meta label="Protocol" value={sub.protocol} mono />
+          <Meta label={t('subscriptions.metaServers')} value={String(sub.server_count)} />
+          <Meta label={t('subscriptions.metaProtocol')} value={sub.protocol} mono />
           <Meta
-            label="Update interval"
+            label={t('subscriptions.metaUpdateInterval')}
             value={
               sub.update_interval_hours ? `${sub.update_interval_hours}h` : '—'
             }
           />
-          <Meta label="Last update" value={timeAgo(sub.last_update)} />
+          <Meta label={t('subscriptions.metaLastUpdate')} value={timeAgo(sub.last_update)} />
         </div>
 
         {/* Data usage */}
         {usage ? (
           <div className="mt-4 space-y-1.5">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">Data usage</span>
+              <span className="text-muted-foreground">
+                {t('subscriptions.dataUsage')}
+              </span>
               <span className="font-mono tabular-nums text-foreground">
                 {formatBytes(usage.used_bytes)} / {formatBytes(usage.total_bytes)}
               </span>
@@ -350,9 +371,15 @@ function SubscriptionCard({
               )}
             />
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>{usedPct.toFixed(0)}% used</span>
+              <span>
+                {t('subscriptions.usedPct', { pct: usedPct.toFixed(0) })}
+              </span>
               {usage.expire ? (
-                <span>Expires {formatDate(usage.expire)}</span>
+                <span>
+                  {t('subscriptions.expires', {
+                    date: formatDate(usage.expire),
+                  })}
+                </span>
               ) : null}
             </div>
           </div>
@@ -367,7 +394,9 @@ function SubscriptionCard({
           className="flex w-full items-center justify-between text-left"
         >
           <span className="text-xs font-medium text-muted-foreground">
-            {expanded ? 'Hide' : 'Show'} servers ({sub.server_count})
+            {expanded
+              ? t('subscriptions.hideServers', { count: sub.server_count })
+              : t('subscriptions.showServers', { count: sub.server_count })}
           </span>
           <ChevronDown
             className={cn(
@@ -384,6 +413,7 @@ function SubscriptionCard({
 }
 
 function ServersList({ id }: { id: string }) {
+  const t = useT()
   const { data: servers, isLoading } = useQuery({
     queryKey: ['subscription-servers', id],
     queryFn: () => api.subscriptionServers(id),
@@ -404,8 +434,8 @@ function ServersList({ id }: { id: string }) {
       <div className="mt-3">
         <EmptyState
           icon={ServerIcon}
-          title="No servers"
-          description="This subscription hasn't imported any servers yet. Try refreshing."
+          title={t('subscriptions.noServersTitle')}
+          description={t('subscriptions.noServersDesc')}
           className="py-8"
         />
       </div>
@@ -422,6 +452,7 @@ function ServersList({ id }: { id: string }) {
 }
 
 function ServerRow({ server }: { server: Server }) {
+  const t = useT()
   const endpoint = `${server.address}:${server.port}`
   return (
     <div
@@ -440,7 +471,7 @@ function ServerRow({ server }: { server: Server }) {
           </span>
           {server.active ? (
             <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-              Active
+              {t('common.active')}
             </span>
           ) : null}
         </div>
@@ -453,7 +484,7 @@ function ServerRow({ server }: { server: Server }) {
         <code className="hidden truncate rounded bg-muted/60 px-2 py-1 font-mono text-xs text-muted-foreground sm:block">
           {endpoint}
         </code>
-        <CopyButton value={endpoint} label="Copy address" />
+        <CopyButton value={endpoint} label={t('subscriptions.copyAddress')} />
       </div>
       <span className="hidden font-mono text-[11px] text-muted-foreground md:inline">
         {server.protocol}
@@ -475,6 +506,7 @@ function AddSubscriptionDialog({
   onOpenChange: (open: boolean) => void
   onCreated: () => void
 }) {
+  const t = useT()
   const { toast } = useToast()
   const [name, setName] = React.useState('')
   const [url, setUrl] = React.useState('')
@@ -491,14 +523,17 @@ function AddSubscriptionDialog({
       onCreated()
       toast({
         variant: 'success',
-        title: 'Subscription added',
-        description: `“${name.trim()}” will import its servers shortly.`,
+        title: t('subscriptions.createdTitle'),
+        description: t('subscriptions.createdDesc', { name: name.trim() }),
       })
       reset()
       onOpenChange(false)
     },
     onError: () =>
-      toast({ variant: 'error', title: 'Could not add subscription' }),
+      toast({
+        variant: 'error',
+        title: t('subscriptions.createErrorTitle'),
+      }),
   })
 
   const canSubmit = name.trim().length > 0 && url.trim().length > 0
@@ -513,31 +548,30 @@ function AddSubscriptionDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add subscription</DialogTitle>
+          <DialogTitle>{t('subscriptions.addDialogTitle')}</DialogTitle>
           <DialogDescription>
-            Import an Xray subscription feed. The server list refreshes on the
-            configured interval.
+            {t('subscriptions.addDialogDesc')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="sub-name">Name</Label>
+            <Label htmlFor="sub-name">{t('subscriptions.nameLabel')}</Label>
             <Input
               id="sub-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. OceanLink Premium"
+              placeholder={t('subscriptions.namePlaceholder')}
               autoFocus
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="sub-url">Subscription URL</Label>
+            <Label htmlFor="sub-url">{t('subscriptions.urlLabel')}</Label>
             <Input
               id="sub-url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://host/s/<token>"
+              placeholder={t('subscriptions.urlPlaceholder')}
               className="font-mono text-xs"
               spellCheck={false}
             />
@@ -546,7 +580,7 @@ function AddSubscriptionDialog({
 
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={() => createMutation.mutate()}
@@ -556,7 +590,7 @@ function AddSubscriptionDialog({
             {createMutation.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : null}
-            Add subscription
+            {t('subscriptions.addSubscription')}
           </Button>
         </DialogFooter>
       </DialogContent>

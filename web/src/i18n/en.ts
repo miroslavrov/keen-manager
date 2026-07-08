@@ -1,6 +1,22 @@
 // English dictionary. Keys are dotted paths resolved by useT(). Keep in sync
 // with ru.ts — every key present here should exist there too.
+//
+// Per-page strings live in ./pages/* fragment modules ({ en, ru }) and are
+// spread in below, so each page's translations can evolve in isolation.
+import { connections } from './pages/connections'
+import { subscriptions } from './pages/subscriptions'
+import { bypass } from './pages/bypass'
+import { dashboard } from './pages/dashboard'
+import { settings } from './pages/settings'
+import { logs } from './pages/logs'
+
 export const en = {
+  connections: connections.en,
+  subscriptions: subscriptions.en,
+  bypass: bypass.en,
+  dashboard: dashboard.en,
+  settings: settings.en,
+  logs: logs.en,
   brand: {
     subtitle: 'VPN / DPI control',
   },
@@ -50,6 +66,38 @@ export const en = {
     polling: 'Polling',
     directWan: 'Direct WAN',
     seconds: 's',
+    confirm: 'Confirm',
+    copy: 'Copy to clipboard',
+    copied: 'Copied',
+    active: 'Active',
+    routingTraffic: 'Routing traffic',
+    unknownLocation: 'Unknown location',
+    on: 'On',
+    off: 'Off',
+    all: 'All',
+    never: 'Never',
+    unknown: 'Unknown',
+    noActiveConnection: 'No active connection',
+    loadingStatus: 'Loading status…',
+    yes: 'Yes',
+    no: 'No',
+    saving: 'Saving…',
+  },
+  status: {
+    up: 'Up',
+    down: 'Down',
+    degraded: 'Degraded',
+    checking: 'Checking',
+    disabled: 'Disabled',
+  },
+  actions: {
+    bringingUp: 'Bringing “{name}” up',
+    takingDown: 'Taking “{name}” down',
+    setActive: '“{name}” set as active route',
+    testing: 'Testing “{name}”…',
+    failedTitle: 'Action failed',
+    failedDesc: 'Could not complete the action on this connection.',
+    connection: 'connection',
   },
   topbar: {
     refreshing: 'Refreshing',

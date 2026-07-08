@@ -3,6 +3,7 @@ import { Loader2, WifiOff } from 'lucide-react'
 import { StatusDot } from '@/components/StatusDot'
 import { TypeBadge } from '@/components/TypeBadge'
 import { LatencyBadge } from '@/components/LatencyBadge'
+import { useT } from '@/i18n'
 import { cn } from '@/lib/utils'
 import type { AppState } from '@/lib/types'
 
@@ -17,6 +18,7 @@ interface StatusPillProps {
  * active connection's transport, name, location and live latency.
  */
 export function StatusPill({ state, loading, className }: StatusPillProps) {
+  const t = useT()
   if (loading) {
     return (
       <div
@@ -26,7 +28,7 @@ export function StatusPill({ state, loading, className }: StatusPillProps) {
         )}
       >
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        <span>Loading status…</span>
+        <span>{t('common.loadingStatus')}</span>
       </div>
     )
   }
@@ -44,7 +46,7 @@ export function StatusPill({ state, loading, className }: StatusPillProps) {
         )}
       >
         <WifiOff className="h-3.5 w-3.5" />
-        <span>No active connection</span>
+        <span>{t('common.noActiveConnection')}</span>
       </div>
     )
   }

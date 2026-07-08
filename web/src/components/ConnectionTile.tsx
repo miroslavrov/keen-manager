@@ -3,6 +3,7 @@ import { MapPin, Radio } from 'lucide-react'
 import { StatusDot } from '@/components/StatusDot'
 import { TypeBadge } from '@/components/TypeBadge'
 import { LatencyBadge } from '@/components/LatencyBadge'
+import { useT } from '@/i18n'
 import { cn, timeAgo } from '@/lib/utils'
 import type { Conn } from '@/lib/types'
 
@@ -13,6 +14,7 @@ interface ConnectionTileProps {
 
 /** Compact connection health tile used in the dashboard grid. */
 export function ConnectionTile({ conn, onClick }: ConnectionTileProps) {
+  const t = useT()
   return (
     <button
       type="button"
@@ -36,7 +38,7 @@ export function ConnectionTile({ conn, onClick }: ConnectionTileProps) {
 
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <MapPin className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">{conn.location ?? 'Unknown location'}</span>
+        <span className="truncate">{conn.location ?? t('common.unknownLocation')}</span>
       </div>
 
       <div className="flex items-center justify-between">
@@ -44,11 +46,11 @@ export function ConnectionTile({ conn, onClick }: ConnectionTileProps) {
           {conn.active ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
               <Radio className="h-3 w-3" />
-              Active
+              {t('common.active')}
             </span>
           ) : (
             <span className="text-[11px] text-muted-foreground">
-              {conn.enabled ? timeAgo(conn.last_check) : 'Disabled'}
+              {conn.enabled ? timeAgo(conn.last_check) : t('common.disabled')}
             </span>
           )}
         </div>

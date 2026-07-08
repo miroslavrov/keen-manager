@@ -1,6 +1,22 @@
 // Русский словарь. Ключи — те же точечные пути, что и в en.ts. Держать в
 // синхронизации с en.ts: любой ключ отсюда должен существовать и там.
+//
+// Постраничные строки живут в модулях-фрагментах ./pages/* ({ en, ru }) и
+// подмешиваются ниже, чтобы переводы каждой страницы жили изолированно.
+import { connections } from './pages/connections'
+import { subscriptions } from './pages/subscriptions'
+import { bypass } from './pages/bypass'
+import { dashboard } from './pages/dashboard'
+import { settings } from './pages/settings'
+import { logs } from './pages/logs'
+
 export const ru = {
+  connections: connections.ru,
+  subscriptions: subscriptions.ru,
+  bypass: bypass.ru,
+  dashboard: dashboard.ru,
+  settings: settings.ru,
+  logs: logs.ru,
   brand: {
     subtitle: 'Управление VPN / DPI',
   },
@@ -50,6 +66,38 @@ export const ru = {
     polling: 'Опрос',
     directWan: 'Прямой WAN',
     seconds: 'с',
+    confirm: 'Подтвердить',
+    copy: 'Скопировать',
+    copied: 'Скопировано',
+    active: 'Активно',
+    routingTraffic: 'Маршрутизирует трафик',
+    unknownLocation: 'Локация неизвестна',
+    on: 'Вкл',
+    off: 'Выкл',
+    all: 'Все',
+    never: 'Никогда',
+    unknown: 'Неизвестно',
+    noActiveConnection: 'Нет активного подключения',
+    loadingStatus: 'Загрузка статуса…',
+    yes: 'Да',
+    no: 'Нет',
+    saving: 'Сохранение…',
+  },
+  status: {
+    up: 'В сети',
+    down: 'Не в сети',
+    degraded: 'Нестабильно',
+    checking: 'Проверка',
+    disabled: 'Отключено',
+  },
+  actions: {
+    bringingUp: 'Поднимаю «{name}»',
+    takingDown: 'Опускаю «{name}»',
+    setActive: '«{name}» назначено активным маршрутом',
+    testing: 'Проверяю «{name}»…',
+    failedTitle: 'Действие не удалось',
+    failedDesc: 'Не удалось выполнить действие для этого подключения.',
+    connection: 'подключение',
   },
   topbar: {
     refreshing: 'Обновление',

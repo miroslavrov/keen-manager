@@ -1,14 +1,7 @@
 import { Badge } from '@/components/ui/badge'
 import { StatusDot } from '@/components/StatusDot'
+import { useT } from '@/i18n'
 import type { ConnStatus } from '@/lib/types'
-
-const label: Record<ConnStatus, string> = {
-  up: 'Up',
-  down: 'Down',
-  degraded: 'Degraded',
-  checking: 'Checking',
-  disabled: 'Disabled',
-}
 
 const variant: Record<
   ConnStatus,
@@ -28,10 +21,11 @@ interface StatusBadgeProps {
 
 /** Status pill: colored dot + text label, semantically colored. */
 export function StatusBadge({ status, className }: StatusBadgeProps) {
+  const t = useT()
   return (
     <Badge variant={variant[status]} className={className}>
       <StatusDot status={status} className="h-2 w-2" />
-      {label[status]}
+      {t(`status.${status}`)}
     </Badge>
   )
 }

@@ -1,0 +1,108 @@
+// Connections page strings. { en, ru } must stay key-for-key in sync.
+export const connections = {
+  en: {
+    title: 'Connections',
+    desc: 'AmneziaWG & Xray tunnels — activate, probe, and manage fallbacks.',
+
+    addConnection: 'Add connection',
+    activate: 'Activate',
+    emptyTitle: 'No connections configured',
+    emptyDesc:
+      'Paste an AmneziaWG config or an Xray share link to add your first tunnel.',
+
+    updateError: 'Could not update connection',
+    deleteError: 'Could not delete connection',
+    deleted: 'Connection deleted',
+    deletedDesc: '“{name}” was removed.',
+    deleteTitle: 'Delete connection?',
+    deleteDesc:
+      '“{name}” will be permanently removed. This cannot be undone.',
+
+    copyEndpoint: 'Copy endpoint',
+    copyConfig: 'Copy config',
+    disableName: 'Disable {name}',
+    enableName: 'Enable {name}',
+    connectionActions: 'Connection actions',
+    bringUp: 'Bring up',
+    takeDown: 'Take down',
+    testReachability: 'Test reachability',
+    fallbackTarget: 'Fallback target',
+    fallsBackTo: 'Falls back to',
+
+    addTitle: 'Add connection',
+    addDesc: 'Import an AmneziaWG configuration or an Xray share link.',
+    name: 'Name',
+    namePlaceholder: 'e.g. Amnezia NL-1',
+    configLabel: 'WireGuard / AmneziaWG config',
+    configHintBefore: 'Paste the full',
+    configHintAfter:
+      ' including the AmneziaWG junk parameters (Jc, S1, S2, H1…).',
+    shareLink: 'Share link',
+    shareLinkHint: 'Supports VLESS, VMess, Trojan and Shadowsocks URIs.',
+    added: 'Connection added',
+    addedDesc: '“{name}” is now being probed.',
+    addError: 'Could not add connection',
+
+    detailFallback: 'Connection',
+    detailDescFallback: 'Tunnel configuration & live metrics',
+    latency: 'Latency',
+    handshake: 'Handshake',
+    received: 'Received',
+    transmitted: 'Transmitted',
+    endpoint: 'Endpoint',
+    configPreview: 'Config preview',
+    lastChecked: 'Last checked {time}',
+  },
+  ru: {
+    title: 'Подключения',
+    desc: 'Туннели AmneziaWG и Xray — активация, проверка и резерв.',
+
+    addConnection: 'Добавить подключение',
+    activate: 'Активировать',
+    emptyTitle: 'Нет настроенных подключений',
+    emptyDesc:
+      'Вставь конфиг AmneziaWG или share-ссылку Xray, чтобы добавить первый туннель.',
+
+    updateError: 'Не удалось обновить подключение',
+    deleteError: 'Не удалось удалить подключение',
+    deleted: 'Подключение удалено',
+    deletedDesc: '«{name}» удалено.',
+    deleteTitle: 'Удалить подключение?',
+    deleteDesc: '«{name}» будет удалено безвозвратно. Отменить это нельзя.',
+
+    copyEndpoint: 'Скопировать адрес узла',
+    copyConfig: 'Скопировать конфиг',
+    disableName: 'Выключить {name}',
+    enableName: 'Включить {name}',
+    connectionActions: 'Действия с подключением',
+    bringUp: 'Поднять',
+    takeDown: 'Отключить',
+    testReachability: 'Проверить доступность',
+    fallbackTarget: 'Резервное подключение',
+    fallsBackTo: 'Резерв —',
+
+    addTitle: 'Добавить подключение',
+    addDesc: 'Импортируй конфигурацию AmneziaWG или share-ссылку Xray.',
+    name: 'Название',
+    namePlaceholder: 'например, Amnezia NL-1',
+    configLabel: 'Конфиг WireGuard / AmneziaWG',
+    configHintBefore: 'Вставь полный',
+    configHintAfter:
+      ', включая мусорные параметры AmneziaWG (Jc, S1, S2, H1…).',
+    shareLink: 'Share-ссылка',
+    shareLinkHint: 'Поддерживаются URI VLESS, VMess, Trojan и Shadowsocks.',
+    added: 'Подключение добавлено',
+    addedDesc: '«{name}» сейчас проверяется.',
+    addError: 'Не удалось добавить подключение',
+
+    detailFallback: 'Подключение',
+    detailDescFallback: 'Конфигурация туннеля и метрики в реальном времени',
+    latency: 'Задержка',
+    handshake: 'Рукопожатие',
+    received: 'Принято',
+    transmitted: 'Передано',
+    endpoint: 'Адрес узла',
+    configPreview: 'Предпросмотр конфига',
+    lastChecked: 'Проверено {time}',
+  },
+}

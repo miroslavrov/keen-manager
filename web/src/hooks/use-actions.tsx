@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '@/lib/api'
 import { useToast } from '@/components/ui/toast'
+import { useT } from '@/i18n'
 
 /**
  * Shared connection action mutations (up / down / activate / test) with
@@ -11,6 +12,7 @@ import { useToast } from '@/components/ui/toast'
 export function useConnectionActions() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const t = useT()
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['state'] })
@@ -28,20 +30,20 @@ export function useConnectionActions() {
     }) => api.connectionAction(id, action),
     onSuccess: (_data, vars) => {
       invalidate()
-      const label = vars.name ? `“${vars.name}”` : 'connection'
+      const name = vars.name ?? t('actions.connection')
       const messages: Record<typeof vars.action, string> = {
-        up: `Bringing ${label} up`,
-        down: `Taking ${label} down`,
-        activate: `${label} set as active route`,
-        test: `Testing ${label}…`,
+        up: t('actions.bringingUp', { name }),
+        down: t('actions.takingDown', { name }),
+        activate: t('actions.setActive', { name }),
+        test: t('actions.testing', { name }),
       }
       toast({ variant: 'success', title: messages[vars.action] })
     },
-    onError: (_e, vars) => {
+    onError: () => {
       toast({
         variant: 'error',
-        title: 'Action failed',
-        description: `Could not ${vars.action} the connection.`,
+        title: t('actions.failedTitle'),
+        description: t('actions.failedDesc'),
       })
     },
   })

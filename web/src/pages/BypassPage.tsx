@@ -37,17 +37,13 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useT } from '@/i18n'
 import type { DomainCheck, NfqwsMode } from '@/lib/types'
-
-const MODE_LABELS: Record<NfqwsMode, string> = {
-  MODE_AUTO: 'Auto (learned + user lists)',
-  MODE_LIST: 'List (hostlists only)',
-  MODE_ALL: 'All traffic',
-}
 
 type NfqwsServiceAction = 'start' | 'stop' | 'restart' | 'reload' | 'install'
 
 export function BypassPage() {
+  const t = useT()
   const { data: nfqws, isLoading } = useQuery({
     queryKey: ['nfqws'],
     queryFn: api.nfqws,
@@ -56,10 +52,7 @@ export function BypassPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="DPI Bypass"
-        description="nfqws2 deep-packet-inspection circumvention — service, strategy, and hostlists."
-      />
+      <PageHeader title={t('bypass.title')} description={t('bypass.desc')} />
 
       {isLoading ? (
         <Skeleton className="h-28" />
@@ -69,9 +62,9 @@ export function BypassPage() {
 
       <Tabs defaultValue="config">
         <TabsList>
-          <TabsTrigger value="config">Config</TabsTrigger>
-          <TabsTrigger value="hostlists">Hostlists</TabsTrigger>
-          <TabsTrigger value="check">Domain check</TabsTrigger>
+          <TabsTrigger value="config">{t('bypass.tabConfig')}</TabsTrigger>
+          <TabsTrigger value="hostlists">{t('bypass.tabHostlists')}</TabsTrigger>
+          <TabsTrigger value="check">{t('bypass.tabCheck')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="config">
@@ -99,6 +92,7 @@ function ServiceControlCard({
   version?: string
   mode?: NfqwsMode
 }) {
+  const t = useT()
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const [pending, setPending] = React.useState<NfqwsServiceAction | null>(null)
@@ -110,16 +104,16 @@ function ServiceControlCard({
       queryClient.invalidateQueries({ queryKey: ['nfqws'] })
       queryClient.invalidateQueries({ queryKey: ['state'] })
       const titles: Record<NfqwsServiceAction, string> = {
-        start: 'Starting nfqws2…',
-        stop: 'Stopping nfqws2…',
-        restart: 'Restarting nfqws2…',
-        reload: 'Reloading strategy…',
-        install: 'Installing nfqws2…',
+        start: t('bypass.starting'),
+        stop: t('bypass.stopping'),
+        restart: t('bypass.restarting'),
+        reload: t('bypass.reloading'),
+        install: t('bypass.installing'),
       }
       toast({ variant: 'success', title: titles[action] })
     },
     onError: () =>
-      toast({ variant: 'error', title: 'Service action failed' }),
+      toast({ variant: 'error', title: t('bypass.actionError') }),
     onSettled: () => setPending(null),
   })
 
@@ -153,15 +147,15 @@ function ServiceControlCard({
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-foreground">nfqws2</h3>
               {!installed ? (
-                <Badge variant="muted">Not installed</Badge>
+                <Badge variant="muted">{t('bypass.notInstalled')}</Badge>
               ) : running ? (
-                <Badge variant="success">Running</Badge>
+                <Badge variant="success">{t('bypass.running')}</Badge>
               ) : (
-                <Badge variant="warning">Stopped</Badge>
+                <Badge variant="warning">{t('bypass.stopped')}</Badge>
               )}
             </div>
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-              {version ?? (installed ? 'version unknown' : 'not present')}
+              {version ?? (installed ? t('bypass.versionUnknown') : t('bypass.notPresent'))}
               {mode ? ` · ${mode}` : ''}
             </p>
           </div>
@@ -180,7 +174,7 @@ function ServiceControlCard({
               ) : (
                 <Download className="h-3.5 w-3.5" />
               )}
-              Install
+              {t('bypass.install')}
             </Button>
           ) : (
             <>
@@ -196,7 +190,7 @@ function ServiceControlCard({
                 ) : (
                   <Play className="h-3.5 w-3.5" />
                 )}
-                Start
+                {t('bypass.start')}
               </Button>
               <Button
                 variant="outline"
@@ -210,7 +204,7 @@ function ServiceControlCard({
                 ) : (
                   <Square className="h-3.5 w-3.5" />
                 )}
-                Stop
+                {t('bypass.stop')}
               </Button>
               <Button
                 variant="outline"
@@ -224,7 +218,7 @@ function ServiceControlCard({
                 ) : (
                   <RotateCw className="h-3.5 w-3.5" />
                 )}
-                Restart
+                {t('bypass.restart')}
               </Button>
               <Button
                 variant="outline"
@@ -238,7 +232,7 @@ function ServiceControlCard({
                 ) : (
                   <RefreshCw className="h-3.5 w-3.5" />
                 )}
-                Reload
+                {t('bypass.reload')}
               </Button>
             </>
           )}
@@ -249,6 +243,7 @@ function ServiceControlCard({
 }
 
 function ConfigEditor() {
+  const t = useT()
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -277,24 +272,30 @@ function ConfigEditor() {
       setDirty(false)
       toast({
         variant: 'success',
-        title: 'Configuration saved',
-        description: 'Reload the service to apply changes.',
+        title: t('bypass.configSaved'),
+        description: t('bypass.configSavedDesc'),
       })
     },
-    onError: () => toast({ variant: 'error', title: 'Could not save config' }),
+    onError: () => toast({ variant: 'error', title: t('bypass.configSaveError') }),
   })
 
   if (isLoading) {
     return <Skeleton className="h-96" />
   }
 
+  const modeLabels: Record<NfqwsMode, string> = {
+    MODE_AUTO: t('bypass.modeAuto'),
+    MODE_LIST: t('bypass.modeList'),
+    MODE_ALL: t('bypass.modeAll'),
+  }
+
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <div className="space-y-1">
-          <CardTitle>Strategy configuration</CardTitle>
+          <CardTitle>{t('bypass.configTitle')}</CardTitle>
           <p className="text-xs text-muted-foreground">
-            Raw nfqws2 arguments and desync mode.
+            {t('bypass.configHint')}
           </p>
         </div>
         <Button
@@ -308,12 +309,12 @@ function ConfigEditor() {
           ) : (
             <Save className="h-3.5 w-3.5" />
           )}
-          Save
+          {t('common.save')}
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-2 sm:max-w-md">
-          <Label htmlFor="nfqws-mode">Bypass mode</Label>
+          <Label htmlFor="nfqws-mode">{t('bypass.modeLabel')}</Label>
           <Select
             value={mode}
             onValueChange={(v) => {
@@ -325,9 +326,9 @@ function ConfigEditor() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(Object.keys(MODE_LABELS) as NfqwsMode[]).map((m) => (
+              {(Object.keys(modeLabels) as NfqwsMode[]).map((m) => (
                 <SelectItem key={m} value={m}>
-                  {MODE_LABELS[m]}
+                  {modeLabels[m]}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -337,7 +338,7 @@ function ConfigEditor() {
         <Separator />
 
         <div className="space-y-2">
-          <Label htmlFor="nfqws-raw">Raw configuration</Label>
+          <Label htmlFor="nfqws-raw">{t('bypass.rawConfigLabel')}</Label>
           <Textarea
             id="nfqws-raw"
             value={raw}
@@ -355,6 +356,7 @@ function ConfigEditor() {
 }
 
 function HostlistsManager() {
+  const t = useT()
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -394,11 +396,11 @@ function HostlistsManager() {
       setDirty(false)
       toast({
         variant: 'success',
-        title: 'Hostlist saved',
-        description: `${selected} updated.`,
+        title: t('bypass.hostlistSaved'),
+        description: t('bypass.hostlistSavedDesc', { name: selected ?? '' }),
       })
     },
-    onError: () => toast({ variant: 'error', title: 'Could not save hostlist' }),
+    onError: () => toast({ variant: 'error', title: t('bypass.hostlistSaveError') }),
   })
 
   if (isLoading) {
@@ -409,8 +411,8 @@ function HostlistsManager() {
     return (
       <EmptyState
         icon={FileText}
-        title="No hostlists"
-        description="nfqws2 has no managed hostlists on this device."
+        title={t('bypass.emptyListsTitle')}
+        description={t('bypass.emptyListsDesc')}
       />
     )
   }
@@ -451,7 +453,7 @@ function HostlistsManager() {
           <div className="space-y-1">
             <CardTitle className="font-mono">{selected}</CardTitle>
             <p className="text-xs text-muted-foreground">
-              {entryCount} active {entryCount === 1 ? 'entry' : 'entries'}
+              {t('bypass.activeEntries', { count: entryCount })}
             </p>
           </div>
           <Button
@@ -465,7 +467,7 @@ function HostlistsManager() {
             ) : (
               <Save className="h-3.5 w-3.5" />
             )}
-            Save
+            {t('common.save')}
           </Button>
         </CardHeader>
         <CardContent>
@@ -480,7 +482,7 @@ function HostlistsManager() {
               }}
               spellCheck={false}
               className="min-h-[360px] font-mono text-xs leading-relaxed"
-              placeholder="# one domain or CIDR per line"
+              placeholder={t('bypass.hostlistPlaceholder')}
             />
           )}
         </CardContent>
@@ -490,6 +492,7 @@ function HostlistsManager() {
 }
 
 function DomainChecker() {
+  const t = useT()
   const { toast } = useToast()
   const [domain, setDomain] = React.useState('')
   const [result, setResult] = React.useState<DomainCheck | null>(null)
@@ -497,7 +500,7 @@ function DomainChecker() {
   const checkMutation = useMutation({
     mutationFn: (d: string) => api.checkDomain(d),
     onSuccess: (res) => setResult(res),
-    onError: () => toast({ variant: 'error', title: 'Domain check failed' }),
+    onError: () => toast({ variant: 'error', title: t('bypass.checkError') }),
   })
 
   const onCheck = () => {
@@ -510,11 +513,8 @@ function DomainChecker() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Domain reachability</CardTitle>
-        <p className="text-xs text-muted-foreground">
-          Probe a hostname on both the direct path and through the nfqws2 desync
-          engine.
-        </p>
+        <CardTitle>{t('bypass.checkTitle')}</CardTitle>
+        <p className="text-xs text-muted-foreground">{t('bypass.checkHint')}</p>
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -526,7 +526,7 @@ function DomainChecker() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') onCheck()
               }}
-              placeholder="youtube.com"
+              placeholder={t('bypass.domainPlaceholder')}
               className="pl-9 font-mono text-sm"
               spellCheck={false}
             />
@@ -541,7 +541,7 @@ function DomainChecker() {
             ) : (
               <Search className="h-4 w-4" />
             )}
-            Check
+            {t('bypass.check')}
           </Button>
         </div>
 
@@ -549,22 +549,24 @@ function DomainChecker() {
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <ReachabilityTile
-                label="Direct path"
+                label={t('bypass.directPath')}
                 ok={result.direct_ok}
-                okText="Reachable directly"
-                failText="Blocked / unreachable"
+                okText={t('bypass.reachableDirect')}
+                failText={t('bypass.blockedUnreachable')}
               />
               <ReachabilityTile
-                label="Through nfqws2"
+                label={t('bypass.throughBypass')}
                 ok={result.bypass_ok}
-                okText="Reachable via bypass"
-                failText="Still unreachable"
+                okText={t('bypass.reachableViaBypass')}
+                failText={t('bypass.stillUnreachable')}
               />
             </div>
             {result.note ? (
               <div className="rounded-md border border-border/70 bg-muted/40 px-3 py-2.5">
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  <span className="font-medium text-foreground">Note. </span>
+                  <span className="font-medium text-foreground">
+                    {t('bypass.note')}{' '}
+                  </span>
                   {result.note}
                 </p>
               </div>
@@ -573,7 +575,7 @@ function DomainChecker() {
         ) : (
           <div className="rounded-md border border-dashed border-border/70 px-4 py-8 text-center">
             <p className="text-xs text-muted-foreground">
-              Enter a domain to run a reachability probe.
+              {t('bypass.checkEmptyHint')}
             </p>
           </div>
         )}

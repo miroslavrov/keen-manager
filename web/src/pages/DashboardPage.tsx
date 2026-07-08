@@ -31,11 +31,13 @@ import { useConnectionActions } from '@/hooks/use-actions'
 import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn, formatUptime, timeAgo } from '@/lib/utils'
+import { useT } from '@/i18n'
 import type { AppState, Conn } from '@/lib/types'
 
 const STATE_POLL_MS = 5000
 
 export function DashboardPage() {
+  const t = useT()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -60,10 +62,12 @@ export function DashboardPage() {
       queryClient.invalidateQueries({ queryKey: ['state'] })
       toast({
         variant: next ? 'warning' : 'success',
-        title: next ? 'Kill-switch engaged' : 'Kill-switch released',
+        title: next
+          ? t('dashboard.killEngagedTitle')
+          : t('dashboard.killReleasedTitle'),
         description: next
-          ? 'Traffic is locked to active tunnels.'
-          : 'Normal routing restored.',
+          ? t('dashboard.killEngagedDesc')
+          : t('dashboard.killReleasedDesc'),
       })
     },
   })
@@ -73,10 +77,10 @@ export function DashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['nfqws'] })
       queryClient.invalidateQueries({ queryKey: ['state'] })
-      toast({ variant: 'success', title: 'nfqws2 restarting…' })
+      toast({ variant: 'success', title: t('dashboard.nfqwsRestarting') })
     },
     onError: () =>
-      toast({ variant: 'error', title: 'Could not restart nfqws2' }),
+      toast({ variant: 'error', title: t('dashboard.nfqwsRestartError') }),
   })
 
   const upCount = connections.filter((c) => c.status === 'up').length
@@ -89,9 +93,9 @@ export function DashboardPage() {
     if (!fo) return undefined
     const id = fo.chain[fo.current_index]
     if (!id) return undefined
-    if (id === 'direct') return 'Direct WAN'
+    if (id === 'direct') return t('common.directWan')
     return connections.find((c) => c.id === id)?.name ?? id
-  }, [state?.failover, connections])
+  }, [state?.failover, connections, t])
 
   const activateBest = () => {
     const candidates = connections
@@ -101,8 +105,8 @@ export function DashboardPage() {
     if (!best) {
       toast({
         variant: 'warning',
-        title: 'No better connection available',
-        description: 'All healthy tunnels are already active or unavailable.',
+        title: t('dashboard.noBetterTitle'),
+        description: t('dashboard.noBetterDesc'),
       })
       return
     }
@@ -112,8 +116,8 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Dashboard"
-        description="Overview & quick actions for your VPN and DPI-bypass stack."
+        title={t('dashboard.title')}
+        description={t('dashboard.desc')}
         actions={
           <>
             <Button
@@ -123,7 +127,7 @@ export function DashboardPage() {
               className="gap-1.5"
             >
               <Gauge className="h-4 w-4" />
-              Activate best
+              {t('dashboard.activateBest')}
             </Button>
             <Button
               variant="outline"
@@ -137,7 +141,7 @@ export function DashboardPage() {
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}
-              Restart nfqws2
+              {t('dashboard.restartNfqws')}
             </Button>
           </>
         }
@@ -162,20 +166,20 @@ export function DashboardPage() {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
               icon={Activity}
-              label="Connections"
+              label={t('dashboard.statConnections')}
               value={String(connections.length)}
-              hint={`${upCount} up · ${downCount} down`}
+              hint={t('dashboard.statUpDown', { up: upCount, down: downCount })}
               tone="default"
             />
             <StatCard
               icon={Radio}
-              label="nfqws2 DPI bypass"
+              label={t('dashboard.statBypass')}
               value={
                 state?.nfqws.installed
                   ? state.nfqws.running
-                    ? 'Running'
-                    : 'Stopped'
-                  : 'Not installed'
+                    ? t('dashboard.statRunning')
+                    : t('dashboard.statStopped')
+                  : t('dashboard.statNotInstalled')
               }
               hint={state?.nfqws.mode ?? '—'}
               tone={
@@ -188,23 +192,31 @@ export function DashboardPage() {
             />
             <StatCard
               icon={GitBranch}
-              label="Failover"
-              value={state?.failover.enabled ? 'Enabled' : 'Disabled'}
+              label={t('dashboard.statFailover')}
+              value={
+                state?.failover.enabled
+                  ? t('common.enabled')
+                  : t('common.disabled')
+              }
               hint={
                 state?.failover.enabled
-                  ? `Live: ${failoverNode ?? '—'}`
-                  : 'No automatic fallback'
+                  ? t('dashboard.statLiveNode', { node: failoverNode ?? '—' })
+                  : t('dashboard.statNoFallback')
               }
               tone={state?.failover.enabled ? 'success' : 'muted'}
             />
             <StatCard
               icon={state?.kill_switch ? ShieldAlert : Shield}
-              label="Kill-switch"
-              value={state?.kill_switch ? 'Engaged' : 'Off'}
+              label={t('dashboard.killSwitch')}
+              value={
+                state?.kill_switch
+                  ? t('dashboard.statKillEngaged')
+                  : t('dashboard.statKillOff')
+              }
               hint={
                 state?.kill_switch
-                  ? 'Non-tunnel traffic blocked'
-                  : 'Fallback to WAN allowed'
+                  ? t('dashboard.statKillBlockedHint')
+                  : t('dashboard.statKillAllowedHint')
               }
               tone={state?.kill_switch ? 'warning' : 'muted'}
             />
@@ -214,9 +226,9 @@ export function DashboardPage() {
           <Card>
             <CardHeader className="flex-row items-center justify-between space-y-0">
               <div className="space-y-1">
-                <CardTitle>Connections</CardTitle>
+                <CardTitle>{t('dashboard.connectionsTitle')}</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  Live health across all tunnels
+                  {t('dashboard.connectionsHint')}
                 </p>
               </div>
               <Button
@@ -225,7 +237,7 @@ export function DashboardPage() {
                 onClick={() => navigate('/connections')}
                 className="gap-1 text-muted-foreground"
               >
-                Manage
+                {t('dashboard.manage')}
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             </CardHeader>
@@ -233,11 +245,11 @@ export function DashboardPage() {
               {connections.length === 0 ? (
                 <EmptyState
                   icon={Activity}
-                  title="No connections yet"
-                  description="Add an AmneziaWG or Xray tunnel to get started."
+                  title={t('dashboard.emptyConnectionsTitle')}
+                  description={t('dashboard.emptyConnectionsDesc')}
                   action={
                     <Button size="sm" onClick={() => navigate('/connections')}>
-                      Add connection
+                      {t('dashboard.addConnection')}
                     </Button>
                   }
                 />
@@ -261,29 +273,30 @@ export function DashboardPage() {
 }
 
 function WanCard({ state }: { state?: AppState }) {
+  const t = useT()
   const wan = state?.wan
   return (
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-muted-foreground" />
-          <CardTitle>WAN</CardTitle>
+          <CardTitle>{t('dashboard.wan')}</CardTitle>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <InfoRow label="Interface">
+        <InfoRow label={t('dashboard.interface')}>
           <span className="font-mono text-sm text-foreground">
             {wan?.interface ?? '—'}
           </span>
         </InfoRow>
         <Separator />
-        <InfoRow label="Public IP">
+        <InfoRow label={t('dashboard.publicIp')}>
           <span className="font-mono text-sm tabular-nums text-foreground">
             {wan?.ip ?? '—'}
           </span>
         </InfoRow>
         <Separator />
-        <InfoRow label="Uptime">
+        <InfoRow label={t('dashboard.uptime')}>
           <span className="font-mono text-sm tabular-nums text-foreground">
             {formatUptime(wan?.uptime_seconds)}
           </span>
@@ -304,13 +317,14 @@ function ActiveHeroCard({
   onToggleKill: (next: boolean) => void
   killPending: boolean
 }) {
+  const t = useT()
   return (
     <Card className="lg:col-span-2">
       <CardContent className="flex h-full flex-col gap-4 p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 space-y-1">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Active route
+              {t('dashboard.activeRoute')}
             </p>
             {active ? (
               <div className="flex items-center gap-2.5">
@@ -324,7 +338,7 @@ function ActiveHeroCard({
               <div className="flex items-center gap-2.5">
                 <StatusDot status="down" />
                 <span className="text-lg font-semibold tracking-tight text-destructive">
-                  No active connection
+                  {t('common.noActiveConnection')}
                 </span>
               </div>
             )}
@@ -348,7 +362,7 @@ function ActiveHeroCard({
         {active?.endpoint ? (
           <div className="rounded-md border border-border/70 bg-muted/40 px-3 py-2">
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Endpoint
+              {t('dashboard.endpoint')}
             </p>
             <p className="mt-0.5 truncate font-mono text-sm text-foreground">
               {active.endpoint}
@@ -373,11 +387,13 @@ function ActiveHeroCard({
               )}
             </div>
             <div className="leading-tight">
-              <p className="text-sm font-medium text-foreground">Kill-switch</p>
+              <p className="text-sm font-medium text-foreground">
+                {t('dashboard.killSwitch')}
+              </p>
               <p className="text-xs text-muted-foreground">
                 {killSwitch
-                  ? 'Blocking non-tunnel traffic'
-                  : 'Allow fallback to WAN'}
+                  ? t('dashboard.killBlocking')
+                  : t('dashboard.killAllowFallback')}
               </p>
             </div>
           </div>
@@ -385,7 +401,7 @@ function ActiveHeroCard({
             checked={killSwitch}
             disabled={killPending}
             onCheckedChange={onToggleKill}
-            aria-label="Toggle kill-switch"
+            aria-label={t('dashboard.toggleKillSwitch')}
           />
         </div>
       </CardContent>

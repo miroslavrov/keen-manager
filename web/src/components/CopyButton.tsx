@@ -2,6 +2,7 @@ import * as React from 'react'
 import { Check, Copy } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { useT } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 interface CopyButtonProps {
@@ -12,6 +13,7 @@ interface CopyButtonProps {
 
 /** Copy-to-clipboard icon button with a transient confirmation state. */
 export function CopyButton({ value, className, label }: CopyButtonProps) {
+  const t = useT()
   const [copied, setCopied] = React.useState(false)
 
   const onCopy = React.useCallback(async () => {
@@ -30,7 +32,7 @@ export function CopyButton({ value, className, label }: CopyButtonProps) {
       variant="ghost"
       size="icon-sm"
       onClick={onCopy}
-      aria-label={label ?? 'Copy to clipboard'}
+      aria-label={label ?? t('common.copy')}
       className={cn('text-muted-foreground', className)}
     >
       {copied ? (

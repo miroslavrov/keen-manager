@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select'
 import { useEvents } from '@/hooks/use-events'
 import { cn } from '@/lib/utils'
+import { useT } from '@/i18n'
 import type { LogService } from '@/lib/types'
 import { api } from '@/lib/api'
 
@@ -43,6 +44,7 @@ function severityClass(line: string): string {
 }
 
 export function LogsPage() {
+  const t = useT()
   const { connected, subscribeLogs } = useEvents()
 
   const [service, setService] = React.useState<LogService>('keen-manager')
@@ -115,13 +117,13 @@ export function LogsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Logs"
-        description="Live service logs streamed from the daemon."
+        title={t('logs.title')}
+        description={t('logs.desc')}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <div
               className="flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1.5"
-              title={connected ? 'Live SSE stream' : 'Falling back to polling'}
+              title={connected ? t('logs.liveTip') : t('logs.pollingTip')}
             >
               <span
                 className={cn(
@@ -132,7 +134,7 @@ export function LogsPage() {
                 )}
               />
               <span className="text-xs font-medium text-muted-foreground">
-                {connected ? 'Live' : 'Polling'}
+                {connected ? t('common.live') : t('common.polling')}
               </span>
             </div>
 
@@ -162,7 +164,7 @@ export function LogsPage() {
               <SelectContent>
                 {LINE_OPTIONS.map((n) => (
                   <SelectItem key={n} value={String(n)}>
-                    {n} lines
+                    {t('logs.linesOption', { count: n })}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -183,7 +185,9 @@ export function LogsPage() {
               ) : null}
             </span>
             <span className="text-muted-foreground/60">·</span>
-            <span className="tabular-nums">{allLines.length} lines</span>
+            <span className="tabular-nums">
+              {t('logs.linesCount', { count: allLines.length })}
+            </span>
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -193,17 +197,17 @@ export function LogsPage() {
               className="h-7 gap-1.5 text-xs"
             >
               <ArrowDownToLine className="h-3.5 w-3.5" />
-              Auto-scroll
+              {t('logs.autoScroll')}
             </Button>
             <CopyButton
               value={allLines.join('\n')}
-              label="Copy visible logs"
+              label={t('logs.copyVisible')}
             />
             <Button
               variant="ghost"
               size="icon-sm"
               onClick={download}
-              aria-label="Download logs"
+              aria-label={t('logs.download')}
               className="text-muted-foreground"
             >
               <Download className="h-3.5 w-3.5" />
@@ -212,7 +216,7 @@ export function LogsPage() {
               variant="ghost"
               size="icon-sm"
               onClick={clear}
-              aria-label="Clear view"
+              aria-label={t('logs.clearView')}
               className="text-muted-foreground"
             >
               <Eraser className="h-3.5 w-3.5" />
@@ -228,13 +232,11 @@ export function LogsPage() {
           {isLoading ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading logs…
+              {t('logs.loading')}
             </div>
           ) : allLines.length === 0 ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">
-              {cleared
-                ? 'View cleared. New lines will appear here.'
-                : 'No log output.'}
+              {cleared ? t('logs.clearedEmpty') : t('logs.noOutput')}
             </div>
           ) : (
             <div>
@@ -259,13 +261,13 @@ export function LogsPage() {
 
       {!connected ? (
         <p className="text-center text-xs text-muted-foreground">
-          Live streaming unavailable — polling every 10s.{' '}
+          {t('logs.pollingNotice')}{' '}
           <button
             type="button"
             onClick={() => refetch()}
             className="font-medium text-primary hover:underline"
           >
-            Refresh now
+            {t('logs.refreshNow')}
           </button>
         </p>
       ) : null}

@@ -31,6 +31,7 @@ import { useTheme, type Theme } from '@/hooks/use-theme'
 import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { formatUptime } from '@/lib/utils'
+import { useT } from '@/i18n'
 import type { Settings } from '@/lib/types'
 
 // The backend PUT accepts a couple of fields not present in the Settings TS
@@ -51,6 +52,7 @@ type SettingsPayload = Partial<Settings> & {
 }
 
 export function SettingsPage() {
+  const t = useT()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -115,11 +117,11 @@ export function SettingsPage() {
       setDirty(false)
       toast({
         variant: 'success',
-        title: 'Settings saved',
-        description: 'Some changes may require a service restart.',
+        title: t('settings.saved'),
+        description: t('settings.savedDesc'),
       })
     },
-    onError: () => toast({ variant: 'error', title: 'Could not save settings' }),
+    onError: () => toast({ variant: 'error', title: t('settings.saveError') }),
   })
 
   const logoutMutation = useMutation({
@@ -133,8 +135,8 @@ export function SettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Settings"
-        description="Web UI, authentication, and platform information."
+        title={t('settings.title')}
+        description={t('settings.desc')}
         actions={
           <Button
             size="sm"
@@ -147,7 +149,7 @@ export function SettingsPage() {
             ) : (
               <Save className="h-3.5 w-3.5" />
             )}
-            Save changes
+            {t('common.saveChanges')}
           </Button>
         }
       />
@@ -162,11 +164,11 @@ export function SettingsPage() {
           {/* Web UI */}
           <Card>
             <CardHeader>
-              <CardTitle>Web interface</CardTitle>
+              <CardTitle>{t('settings.webInterface')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="port">Listen port</Label>
+                <Label htmlFor="port">{t('settings.port')}</Label>
                 <Input
                   id="port"
                   type="number"
@@ -177,14 +179,14 @@ export function SettingsPage() {
                   className="max-w-[160px] tabular-nums"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Changing the port requires restarting the daemon.
+                  {t('settings.portHint')}
                 </p>
               </div>
 
               <Separator />
 
               <div className="space-y-2">
-                <Label htmlFor="theme">Theme</Label>
+                <Label htmlFor="theme">{t('settings.theme')}</Label>
                 <Select
                   value={form.theme}
                   onValueChange={(v) => update('theme', v as Theme)}
@@ -193,26 +195,26 @@ export function SettingsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="dark">Dark</SelectItem>
-                    <SelectItem value="light">Light</SelectItem>
+                    <SelectItem value="dark">{t('settings.themeDark')}</SelectItem>
+                    <SelectItem value="light">{t('settings.themeLight')}</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Currently applied: {theme}.
+                  {t('settings.themeCurrent', { theme })}
                 </p>
               </div>
 
               <Separator />
 
               <ToggleRow
-                label="Backup on change"
-                description="Snapshot config before every write so changes can be rolled back."
+                label={t('settings.backupOnChange')}
+                description={t('settings.backupOnChangeDesc')}
                 checked={form.backup_on_change}
                 onCheckedChange={(v) => update('backup_on_change', v)}
               />
 
               <div className="space-y-2">
-                <Label htmlFor="rollback">Rollback timeout (s)</Label>
+                <Label htmlFor="rollback">{t('settings.rollbackTimeout')}</Label>
                 <Input
                   id="rollback"
                   type="number"
@@ -224,8 +226,7 @@ export function SettingsPage() {
                   className="max-w-[160px] tabular-nums"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Auto-revert a risky change if connectivity isn&apos;t confirmed
-                  within this window.
+                  {t('settings.rollbackTimeoutHint')}
                 </p>
               </div>
 
@@ -233,7 +234,7 @@ export function SettingsPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="auto-select">
-                  Auto-select interval (minutes)
+                  {t('settings.autoSelectInterval')}
                 </Label>
                 <Input
                   id="auto-select"
@@ -246,16 +247,15 @@ export function SettingsPage() {
                   className="max-w-[160px] tabular-nums"
                 />
                 <p className="text-xs text-muted-foreground">
-                  How often to re-pick the fastest server. Set to 0 for manual
-                  selection only.
+                  {t('settings.autoSelectIntervalHint')}
                 </p>
               </div>
 
               <Separator />
 
               <ToggleRow
-                label="Kill-switch on by default"
-                description="Engage the kill-switch automatically at daemon startup."
+                label={t('settings.killSwitchDefault')}
+                description={t('settings.killSwitchDefaultDesc')}
                 checked={form.kill_switch_default}
                 onCheckedChange={(v) => update('kill_switch_default', v)}
               />
@@ -266,19 +266,21 @@ export function SettingsPage() {
           <div className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Authentication</CardTitle>
+                <CardTitle>{t('settings.authentication')}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-5">
                 <ToggleRow
-                  label="Require password"
-                  description="Protect the control panel with a password."
+                  label={t('settings.requirePassword')}
+                  description={t('settings.requirePasswordDesc')}
                   checked={form.auth_enabled}
                   onCheckedChange={(v) => update('auth_enabled', v)}
                 />
 
                 <div className="space-y-2">
                   <Label htmlFor="password">
-                    {form.auth_enabled ? 'Set / change password' : 'Password'}
+                    {form.auth_enabled
+                      ? t('settings.setChangePassword')
+                      : t('settings.password')}
                   </Label>
                   <div className="relative max-w-sm">
                     <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -290,15 +292,14 @@ export function SettingsPage() {
                         setPassword(e.target.value)
                         setDirty(true)
                       }}
-                      placeholder="Leave blank to keep current"
+                      placeholder={t('settings.passwordPlaceholder')}
                       autoComplete="new-password"
                       disabled={!form.auth_enabled}
                       className="pl-9"
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Saved securely on the router. Blank keeps the existing
-                    password.
+                    {t('settings.passwordHint')}
                   </p>
                 </div>
 
@@ -316,7 +317,7 @@ export function SettingsPage() {
                       ) : (
                         <LogOut className="h-4 w-4" />
                       )}
-                      Sign out
+                      {t('settings.signOut')}
                     </Button>
                   </>
                 ) : null}
@@ -346,44 +347,50 @@ function PlatformCard({
     uptime_seconds: number
   }
 }) {
+  const t = useT()
   return (
     <Card>
       <CardHeader className="flex-row items-center gap-2 space-y-0">
         <Cpu className="h-4 w-4 text-muted-foreground" />
-        <CardTitle>Platform</CardTitle>
+        <CardTitle>{t('settings.platform')}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <InfoRow icon={Cpu} label="Architecture" value={platform?.arch} mono />
+        <InfoRow
+          icon={Cpu}
+          label={t('settings.architecture')}
+          value={platform?.arch}
+          mono
+        />
         <Separator />
         <InfoRow
           icon={ServerIcon}
-          label="OS version"
+          label={t('settings.osVersion')}
           value={platform?.os_version}
         />
         <Separator />
         <InfoRow
           icon={Info}
-          label="Entware path"
+          label={t('settings.entwarePath')}
           value={platform?.entware_path}
           mono
         />
         <Separator />
         <InfoRow
           icon={Info}
-          label="Daemon version"
+          label={t('settings.daemonVersion')}
           value={health ? `v${health.version}` : undefined}
           mono
         />
         <Separator />
         <InfoRow
           icon={Info}
-          label="Kernel / OS"
+          label={t('settings.kernelOs')}
           value={health?.os}
         />
         <Separator />
         <InfoRow
           icon={Activity}
-          label="Daemon uptime"
+          label={t('settings.daemonUptime')}
           value={
             health?.uptime_seconds !== undefined
               ? formatUptime(health.uptime_seconds)
