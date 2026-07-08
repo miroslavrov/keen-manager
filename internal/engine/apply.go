@@ -89,6 +89,14 @@ func (e *Engine) bringUp(c model.Connection) error {
 		if !ok {
 			return fmt.Errorf("server credentials missing from vault")
 		}
+		// Provision xray-core itself if missing (no-op when present / dry-run).
+		// The one-time download runs over the current WAN before we capture it.
+		ictx, icancel := context.WithTimeout(e.baseCtx(), 4*time.Minute)
+		err := e.xray.Ensure(ictx)
+		icancel()
+		if err != nil {
+			return fmt.Errorf("xray-core not available: %w", err)
+		}
 		cfg, err := e.buildActiveXray(srv)
 		if err != nil {
 			return err
