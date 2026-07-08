@@ -26,7 +26,11 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Pinned to the toolchain the committed bundle is built with so the
+          # "bundle up-to-date" guard below is byte-deterministic (bundling is
+          # done by lockfile-pinned vite/rollup/esbuild, but we pin Node too to
+          # remove the last variable).
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
 
@@ -34,6 +38,16 @@ jobs:
       # current sources (not just the committed bundle).
       - name: Build front-end
         run: make web
+
+      # Guard against the stale-embedded-bundle bug: if the freshly built bundle
+      # differs from what's committed, someone changed web/src without running
+      # `make web`. Fail loudly with instructions rather than shipping blank tabs.
+      - name: Verify committed bundle is up to date
+        run: |
+          if ! git diff --exit-code -- internal/webui/dist; then
+            echo "::error::internal/webui/dist is stale. Run 'make web' and commit the rebuilt bundle."
+            exit 1
+          fi
 
       - name: Vet
         run: make vet

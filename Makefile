@@ -82,16 +82,24 @@ web:
 # ---- Single-target build ---------------------------------------------------
 # Builds whatever GOARCH/GOMIPS are set in the environment (default: host).
 # Example: make build GOARCH=mipsle GOMIPS=softfloat
+#
+# Depends on `web`: the front-end is go:embed'd, so every build starts from a
+# freshly compiled bundle. This is the guard against the "source fixed but the
+# embedded bundle is stale" bug (the blank-tabs regression). Iterating on Go
+# only? Call `go build ./cmd/keen-manager` directly to skip the web step.
 .PHONY: build
-build:
+build: web
 	@echo ">> building $(BINARY) (GOARCH=$(GOARCH) GOMIPS=$(GOMIPS)) -> $(BUILD_DIR)/$(BINARY)"
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" \
 		-o $(BUILD_DIR)/$(BINARY) $(MAIN_PKG)
 
 # ---- Cross-compile every router target ------------------------------------
+# Also depends on `web` so a stale embedded bundle can never be cross-compiled
+# into a release. `make dist` (web build-all) runs the web target once — make
+# de-duplicates a shared prerequisite within a single invocation.
 .PHONY: build-all
-build-all:
+build-all: web
 	@mkdir -p $(BUILD_DIR)
 	@for t in $(TARGETS); do \
 		suffix=$${t%%:*}; rest=$${t#*:}; goarch=$${rest%%:*}; gomips=$${rest#*:}; \
