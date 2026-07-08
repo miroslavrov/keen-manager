@@ -108,19 +108,26 @@ func (m *Manager) DisableKillSwitch() error {
 }
 
 func (m *Manager) installPolicyRoute() error {
-	// ip rule fwmark <mark> lookup <table>; ip route add local default dev lo table <table>
-	steps := [][]string{
-		{m.IPBin, "rule", "add", "fwmark", fmt.Sprintf("0x%x", Mark), "lookup", fmt.Sprint(Table)},
-		{m.IPBin, "route", "add", "local", "default", "dev", "lo", "table", fmt.Sprint(Table)},
+	mark := fmt.Sprintf("0x%x", Mark)
+	table := fmt.Sprint(Table)
+
+	// `ip rule add` ALWAYS appends, even an identical rule — so a naive add on
+	// every Reapply() (the ndm hook fires on each topology change) would leak
+	// duplicate rules indefinitely. Delete any existing copy first, then add
+	// exactly one. The del is best-effort (errors when absent, which is fine).
+	_ = m.Runner.Run(m.IPBin, "rule", "del", "fwmark", mark, "lookup", table)
+	if err := m.Runner.MustRun(m.IPBin, "rule", "add", "fwmark", mark, "lookup", table); err != nil {
+		// Tolerate "exists" in case a concurrent add already installed it.
+		if !strings.Contains(err.Error(), "exists") {
+			return fmt.Errorf("ip rule add: %w", err)
+		}
 	}
-	for _, s := range steps {
-		// These are add-if-absent; ignore "exists" errors by pre-deleting.
-		_ = m.Runner.Run(s[0], append([]string{replaceAddDel(s[1])}, s[2:]...)...)
-		if err := m.Runner.MustRun(s[0], s[1:]...); err != nil {
-			// Tolerate "File exists" which means it's already installed.
-			if !strings.Contains(err.Error(), "exists") {
-				return err
-			}
+
+	// `ip route replace` is idempotent (adds or updates), so it is safe to call
+	// repeatedly without accumulating state.
+	if err := m.Runner.MustRun(m.IPBin, "route", "replace", "local", "default", "dev", "lo", "table", table); err != nil {
+		if !strings.Contains(err.Error(), "exists") {
+			return fmt.Errorf("ip route replace: %w", err)
 		}
 	}
 	return nil
@@ -190,13 +197,6 @@ func (m *Manager) applyChain(chain string, rules [][]string, add bool) error {
 	_ = m.Runner.Run(m.IPTables, "-t", table, "-F", chain)
 	_ = m.Runner.Run(m.IPTables, "-t", table, "-X", chain)
 	return nil
-}
-
-func replaceAddDel(verb string) string {
-	if verb == "rule" || verb == "route" {
-		return verb // handled by explicit del calls elsewhere
-	}
-	return verb
 }
 
 // HookScript returns the contents of the ndm netfilter.d hook that re-applies
