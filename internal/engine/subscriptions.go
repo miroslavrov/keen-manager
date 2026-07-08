@@ -321,6 +321,45 @@ func (e *Engine) DeleteSubscription(id string) error {
 	return nil
 }
 
+// UpdateSubscription applies a partial update to a subscription's editable
+// fields — name, auto_select_best and update_interval_hours — and returns the
+// refreshed view. Server membership is only ever changed by RefreshSubscription,
+// so this is safe to call without touching the active tunnel.
+func (e *Engine) UpdateSubscription(id string, fields map[string]any) (SubView, error) {
+	if _, ok := findSub(e.store.Get(), id); !ok {
+		return SubView{}, fmt.Errorf("subscription %s not found", id)
+	}
+	if err := e.store.Mutate(func(s *model.State) error {
+		for i := range s.Subscriptions {
+			if s.Subscriptions[i].ID != id {
+				continue
+			}
+			if v, ok := fields["name"].(string); ok {
+				if n := strings.TrimSpace(v); n != "" {
+					s.Subscriptions[i].Name = n
+				}
+			}
+			if v, ok := fields["auto_select_best"].(bool); ok {
+				s.Subscriptions[i].AutoSelectBest = v
+			}
+			// JSON numbers decode to float64.
+			if v, ok := fields["update_interval_hours"].(float64); ok {
+				if h := int(v); h >= 0 {
+					s.Subscriptions[i].UpdateInterval = h
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		return SubView{}, err
+	}
+	e.Logf("subscription updated: %s", id)
+	e.publishState()
+	st := e.store.Get()
+	sv, _ := findSub(st, id)
+	return e.subView(st, sv), nil
+}
+
 // SubscriptionServers returns the server list view for a subscription.
 func (e *Engine) SubscriptionServers(id string) []ServerView {
 	st := e.store.Get()

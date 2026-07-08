@@ -35,6 +35,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Subscriptions.
 	mux.HandleFunc("GET /api/subscriptions", s.requireAuth(s.handleSubscriptions))
 	mux.HandleFunc("POST /api/subscriptions", s.requireAuth(s.handleCreateSubscription))
+	mux.HandleFunc("PUT /api/subscriptions/{id}", s.requireAuth(s.handleUpdateSubscription))
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", s.requireAuth(s.handleDeleteSubscription))
 	mux.HandleFunc("POST /api/subscriptions/{id}/refresh", s.requireAuth(s.handleRefreshSubscription))
 	mux.HandleFunc("GET /api/subscriptions/{id}/servers", s.requireAuth(s.handleSubscriptionServers))
@@ -162,6 +163,20 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 	v, err := s.eng.CreateSubscription(body.Name, body.URL)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request) {
+	var fields map[string]any
+	if err := readJSON(r, &fields); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	v, err := s.eng.UpdateSubscription(r.PathValue("id"), fields)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
