@@ -11,54 +11,56 @@ import {
 
 export interface NavItem {
   to: string
-  label: string
+  /** i18n key for the sidebar label (resolved via useT). */
+  labelKey: string
+  /** i18n key for the description shown in tooltips / command palette. */
+  descKey: string
   icon: LucideIcon
   end?: boolean
-  description: string
 }
 
 export const NAV_ITEMS: NavItem[] = [
   {
     to: '/',
-    label: 'Dashboard',
+    labelKey: 'nav.dashboard',
+    descKey: 'nav.dashboardDesc',
     icon: LayoutDashboard,
     end: true,
-    description: 'Overview & quick actions',
   },
   {
     to: '/connections',
-    label: 'Connections',
+    labelKey: 'nav.connections',
+    descKey: 'nav.connectionsDesc',
     icon: Activity,
-    description: 'AmneziaWG & Xray tunnels',
   },
   {
     to: '/subscriptions',
-    label: 'Subscriptions',
+    labelKey: 'nav.subscriptions',
+    descKey: 'nav.subscriptionsDesc',
     icon: Globe,
-    description: 'Xray subscription feeds',
   },
   {
     to: '/bypass',
-    label: 'Bypass',
+    labelKey: 'nav.bypass',
+    descKey: 'nav.bypassDesc',
     icon: Radio,
-    description: 'nfqws2 DPI bypass',
   },
   {
     to: '/failover',
-    label: 'Failover',
+    labelKey: 'nav.failover',
+    descKey: 'nav.failoverDesc',
     icon: GitBranch,
-    description: 'Fallback chain & health',
   },
   {
     to: '/logs',
-    label: 'Logs',
+    labelKey: 'nav.logs',
+    descKey: 'nav.logsDesc',
     icon: ScrollText,
-    description: 'Live service logs',
   },
   {
     to: '/settings',
-    label: 'Settings',
+    labelKey: 'nav.settings',
+    descKey: 'nav.settingsDesc',
     icon: Settings,
-    description: 'Web UI, auth & platform',
   },
 ]

@@ -10,11 +10,13 @@ import {
 } from '@/components/ui/tooltip'
 import { StatusPill } from '@/components/StatusPill'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { LanguageToggle } from '@/components/LanguageToggle'
 import { useTheme } from '@/hooks/use-theme'
 import { useEvents } from '@/hooks/use-events'
 import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useT } from '@/i18n'
 
 interface TopBarProps {
   onOpenSidebar: () => void
@@ -22,6 +24,7 @@ interface TopBarProps {
 
 /** Top app bar: mobile nav trigger, global status, kill-switch, theme, refresh. */
 export function TopBar({ onOpenSidebar }: TopBarProps) {
+  const t = useT()
   const queryClient = useQueryClient()
   const { theme, toggleTheme } = useTheme()
   const { connected } = useEvents()
@@ -46,17 +49,22 @@ export function TopBar({ onOpenSidebar }: TopBarProps) {
       queryClient.invalidateQueries({ queryKey: ['state'] })
       toast({
         variant: next ? 'warning' : 'success',
-        title: next ? 'Kill-switch engaged' : 'Kill-switch released',
+        title: next
+          ? t('topbar.killswitchEngaged')
+          : t('topbar.killswitchReleased'),
         description: next
-          ? 'All traffic is blocked unless it goes through an active tunnel.'
-          : 'Normal routing restored.',
+          ? t('topbar.killswitchEngagedDesc')
+          : t('topbar.killswitchReleasedDesc'),
       })
     },
   })
 
   const refresh = () => {
     queryClient.invalidateQueries()
-    toast({ title: 'Refreshing', description: 'Reloading live state…' })
+    toast({
+      title: t('topbar.refreshing'),
+      description: t('topbar.refreshingDesc'),
+    })
   }
 
   return (
@@ -82,9 +90,11 @@ export function TopBar({ onOpenSidebar }: TopBarProps) {
             )}
           />
           <span className="text-[11px] font-medium text-muted-foreground">
-            {connected ? 'Live' : 'Polling'}
+            {connected ? t('common.live') : t('common.polling')}
           </span>
         </div>
+
+        <LanguageToggle />
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -92,12 +102,12 @@ export function TopBar({ onOpenSidebar }: TopBarProps) {
               variant="ghost"
               size="icon"
               onClick={refresh}
-              aria-label="Refresh data"
+              aria-label={t('common.refresh')}
             >
               <RefreshCw className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Refresh</TooltipContent>
+          <TooltipContent>{t('common.refresh')}</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -106,7 +116,7 @@ export function TopBar({ onOpenSidebar }: TopBarProps) {
               variant="ghost"
               size="icon"
               onClick={toggleTheme}
-              aria-label="Toggle theme"
+              aria-label={theme === 'dark' ? t('topbar.lightTheme') : t('topbar.darkTheme')}
             >
               {theme === 'dark' ? (
                 <Sun className="h-4 w-4" />
@@ -116,7 +126,7 @@ export function TopBar({ onOpenSidebar }: TopBarProps) {
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {theme === 'dark' ? 'Light theme' : 'Dark theme'}
+            {theme === 'dark' ? t('topbar.lightTheme') : t('topbar.darkTheme')}
           </TooltipContent>
         </Tooltip>
 
@@ -138,14 +148,14 @@ export function TopBar({ onOpenSidebar }: TopBarProps) {
                 <Power className="h-4 w-4" />
               )}
               <span className="hidden sm:inline">
-                {killActive ? 'Kill-switch ON' : 'Kill-switch'}
+                {killActive ? t('topbar.killswitchOn') : t('topbar.killswitch')}
               </span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
             {killActive
-              ? 'Traffic is locked to active tunnels'
-              : 'Block all non-tunnel traffic'}
+              ? t('topbar.killswitchTipOn')
+              : t('topbar.killswitchTipOff')}
           </TooltipContent>
         </Tooltip>
       </div>
@@ -154,13 +164,21 @@ export function TopBar({ onOpenSidebar }: TopBarProps) {
         open={confirmKill}
         onOpenChange={setConfirmKill}
         destructive={!killActive}
-        title={killActive ? 'Release kill-switch?' : 'Engage kill-switch?'}
+        title={
+          killActive
+            ? t('topbar.killswitchReleaseTitle')
+            : t('topbar.killswitchEngageTitle')
+        }
         description={
           killActive
-            ? 'Traffic will be allowed to fall back to the direct WAN path if all tunnels are down.'
-            : 'While engaged, any traffic that is not carried by an active tunnel will be dropped. Use this if you suspect a leak.'
+            ? t('topbar.killswitchReleaseDesc')
+            : t('topbar.killswitchEngageDesc')
         }
-        confirmLabel={killActive ? 'Release' : 'Engage kill-switch'}
+        confirmLabel={
+          killActive
+            ? t('topbar.killswitchReleaseConfirm')
+            : t('topbar.killswitchEngageConfirm')
+        }
         loading={killMutation.isPending}
         onConfirm={() => {
           killMutation.mutate(!killActive)

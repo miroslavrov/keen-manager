@@ -34,11 +34,24 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn, timeAgo } from '@/lib/utils'
+import { useT } from '@/i18n'
 import type { Conn, Failover } from '@/lib/types'
 
 const DIRECT = 'direct'
 
+/** Guarantee the array fields are never null/undefined so rendering can never
+ *  throw on `.length`/`.map` — the root cause of the old whole-app blank-out. */
+function normalize(f: Failover): Failover {
+  return {
+    ...f,
+    chain: Array.isArray(f.chain) ? f.chain : [],
+    history: Array.isArray(f.history) ? f.history : [],
+    current_index: typeof f.current_index === 'number' ? f.current_index : -1,
+  }
+}
+
 export function FailoverPage() {
+  const t = useT()
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -57,7 +70,7 @@ export function FailoverPage() {
 
   React.useEffect(() => {
     if (failover && !dirty) {
-      setDraft(failover)
+      setDraft(normalize(failover))
     }
   }, [failover, dirty])
 
@@ -67,10 +80,9 @@ export function FailoverPage() {
       queryClient.invalidateQueries({ queryKey: ['failover'] })
       queryClient.invalidateQueries({ queryKey: ['state'] })
       setDirty(false)
-      toast({ variant: 'success', title: 'Failover configuration saved' })
+      toast({ variant: 'success', title: t('failover.saved') })
     },
-    onError: () =>
-      toast({ variant: 'error', title: 'Could not save failover config' }),
+    onError: () => toast({ variant: 'error', title: t('failover.saveError') }),
   })
 
   const update = (patch: Partial<Failover>) => {
@@ -85,7 +97,7 @@ export function FailoverPage() {
   }, [connections])
 
   const nameFor = (id: string) =>
-    id === DIRECT ? 'Direct WAN' : (connById.get(id)?.name ?? id)
+    id === DIRECT ? t('common.directWan') : (connById.get(id)?.name ?? id)
 
   const availableToAdd = React.useMemo(() => {
     const inChain = new Set(draft?.chain ?? [])
@@ -95,10 +107,7 @@ export function FailoverPage() {
   if (isLoading || !draft) {
     return (
       <div className="space-y-6">
-        <PageHeader
-          title="Failover"
-          description="Fallback chain & health-driven route switching."
-        />
+        <PageHeader title={t('failover.title')} description={t('failover.desc')} />
         <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
           <Skeleton className="h-96" />
           <Skeleton className="h-96" />
@@ -107,8 +116,12 @@ export function FailoverPage() {
     )
   }
 
+  // Local, always-array views used for all rendering below.
+  const chain = draft.chain ?? []
+  const history = draft.history ?? []
+
   const moveNode = (index: number, dir: -1 | 1) => {
-    const next = [...draft.chain]
+    const next = [...chain]
     const target = index + dir
     if (target < 0 || target >= next.length) return
     ;[next[index], next[target]] = [next[target], next[index]]
@@ -116,40 +129,38 @@ export function FailoverPage() {
   }
 
   const removeNode = (index: number) => {
-    const next = draft.chain.filter((_, i) => i !== index)
+    const next = chain.filter((_, i) => i !== index)
     update({ chain: next })
   }
 
   const addNode = (id: string) => {
     // Keep "direct" pinned to the end if present.
-    const hasDirect = draft.chain.includes(DIRECT)
-    const withoutDirect = draft.chain.filter((c) => c !== DIRECT)
-    const next = hasDirect
-      ? [...withoutDirect, id, DIRECT]
-      : [...draft.chain, id]
+    const hasDirect = chain.includes(DIRECT)
+    const withoutDirect = chain.filter((c) => c !== DIRECT)
+    const next = hasDirect ? [...withoutDirect, id, DIRECT] : [...chain, id]
     update({ chain: next })
   }
 
   const addDirect = () => {
-    if (draft.chain.includes(DIRECT)) return
-    update({ chain: [...draft.chain, DIRECT] })
+    if (chain.includes(DIRECT)) return
+    update({ chain: [...chain, DIRECT] })
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Failover"
-        description="Fallback chain & health-driven route switching."
+        title={t('failover.title')}
+        description={t('failover.desc')}
         actions={
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
               <Switch
                 checked={draft.enabled}
                 onCheckedChange={(v) => update({ enabled: v })}
-                aria-label="Enable failover"
+                aria-label={t('failover.enable')}
               />
               <span className="text-sm text-muted-foreground">
-                {draft.enabled ? 'Enabled' : 'Disabled'}
+                {draft.enabled ? t('common.enabled') : t('common.disabled')}
               </span>
             </div>
             <Button
@@ -163,7 +174,7 @@ export function FailoverPage() {
               ) : (
                 <Save className="h-3.5 w-3.5" />
               )}
-              Save
+              {t('common.save')}
             </Button>
           </div>
         }
@@ -174,9 +185,9 @@ export function FailoverPage() {
         <Card className={cn(!draft.enabled && 'opacity-70')}>
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <div className="space-y-1">
-              <CardTitle>Fallback chain</CardTitle>
+              <CardTitle>{t('failover.chainTitle')}</CardTitle>
               <p className="text-xs text-muted-foreground">
-                Traffic prefers the top node; it descends on repeated failure.
+                {t('failover.chainHint')}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -190,7 +201,7 @@ export function FailoverPage() {
                 <SelectTrigger className="h-8 w-[150px] text-xs">
                   <span className="flex items-center gap-1.5 text-muted-foreground">
                     <Plus className="h-3.5 w-3.5" />
-                    Add node
+                    {t('failover.addNode')}
                   </span>
                 </SelectTrigger>
                 <SelectContent>
@@ -199,13 +210,12 @@ export function FailoverPage() {
                       {c.name}
                     </SelectItem>
                   ))}
-                  {!draft.chain.includes(DIRECT) ? (
-                    <SelectItem value={DIRECT}>Direct WAN</SelectItem>
+                  {!chain.includes(DIRECT) ? (
+                    <SelectItem value={DIRECT}>{t('common.directWan')}</SelectItem>
                   ) : null}
-                  {availableToAdd.length === 0 &&
-                  draft.chain.includes(DIRECT) ? (
+                  {availableToAdd.length === 0 && chain.includes(DIRECT) ? (
                     <SelectItem value="__none" disabled>
-                      All connections added
+                      {t('failover.allAdded')}
                     </SelectItem>
                   ) : null}
                 </SelectContent>
@@ -213,19 +223,19 @@ export function FailoverPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {draft.chain.length === 0 ? (
+            {chain.length === 0 ? (
               <EmptyState
                 icon={GitBranch}
-                title="Empty chain"
-                description="Add connections to build a fallback order. The last node is typically Direct WAN or the kill-switch."
+                title={t('failover.emptyTitle')}
+                description={t('failover.emptyDesc')}
               />
             ) : (
               <ol className="space-y-0">
-                {draft.chain.map((id, index) => {
+                {chain.map((id, index) => {
                   const isActive = index === draft.current_index
                   const isDirect = id === DIRECT
                   const conn = connById.get(id)
-                  const isLast = index === draft.chain.length - 1
+                  const isLast = index === chain.length - 1
                   return (
                     <li key={`${id}-${index}`}>
                       <div
@@ -252,10 +262,10 @@ export function FailoverPage() {
                             <>
                               <Shield className="h-4 w-4 text-muted-foreground" />
                               <span className="text-sm font-medium text-foreground">
-                                Direct WAN
+                                {t('common.directWan')}
                               </span>
                               <span className="text-xs text-muted-foreground">
-                                (no tunnel)
+                                {t('failover.noTunnel')}
                               </span>
                             </>
                           ) : (
@@ -270,7 +280,7 @@ export function FailoverPage() {
                           {isActive ? (
                             <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
                               <Radio className="h-3 w-3" />
-                              Live
+                              {t('common.live')}
                             </span>
                           ) : null}
                         </div>
@@ -281,7 +291,7 @@ export function FailoverPage() {
                             size="icon-sm"
                             disabled={index === 0}
                             onClick={() => moveNode(index, -1)}
-                            aria-label="Move up"
+                            aria-label={t('failover.moveUp')}
                           >
                             <ChevronUp className="h-4 w-4" />
                           </Button>
@@ -290,7 +300,7 @@ export function FailoverPage() {
                             size="icon-sm"
                             disabled={isLast}
                             onClick={() => moveNode(index, 1)}
-                            aria-label="Move down"
+                            aria-label={t('failover.moveDown')}
                           >
                             <ChevronDown className="h-4 w-4" />
                           </Button>
@@ -298,7 +308,7 @@ export function FailoverPage() {
                             variant="ghost"
                             size="icon-sm"
                             onClick={() => removeNode(index)}
-                            aria-label="Remove node"
+                            aria-label={t('failover.removeNode')}
                             className="text-muted-foreground hover:text-destructive"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -322,14 +332,14 @@ export function FailoverPage() {
         {/* Settings */}
         <Card className={cn('h-fit', !draft.enabled && 'opacity-70')}>
           <CardHeader>
-            <CardTitle>Health probing</CardTitle>
+            <CardTitle>{t('failover.healthTitle')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="probe-target">Probe target</Label>
+              <Label htmlFor="probe-target">{t('failover.probeTarget')}</Label>
               <Input
                 id="probe-target"
-                value={draft.probe_target}
+                value={draft.probe_target ?? ''}
                 onChange={(e) => update({ probe_target: e.target.value })}
                 className="font-mono text-xs"
                 spellCheck={false}
@@ -338,12 +348,14 @@ export function FailoverPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label htmlFor="check-interval">Check interval (s)</Label>
+                <Label htmlFor="check-interval">
+                  {t('failover.checkInterval')}
+                </Label>
                 <Input
                   id="check-interval"
                   type="number"
                   min={1}
-                  value={draft.check_interval_s}
+                  value={draft.check_interval_s ?? 30}
                   onChange={(e) =>
                     update({ check_interval_s: Number(e.target.value) })
                   }
@@ -351,12 +363,14 @@ export function FailoverPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="fail-threshold">Failure threshold</Label>
+                <Label htmlFor="fail-threshold">
+                  {t('failover.failThreshold')}
+                </Label>
                 <Input
                   id="fail-threshold"
                   type="number"
                   min={1}
-                  value={draft.failure_threshold}
+                  value={draft.failure_threshold ?? 3}
                   onChange={(e) =>
                     update({ failure_threshold: Number(e.target.value) })
                   }
@@ -369,15 +383,15 @@ export function FailoverPage() {
 
             <div className="flex items-center justify-between gap-3">
               <div className="space-y-0.5">
-                <Label>Auto-return</Label>
+                <Label>{t('failover.autoReturn')}</Label>
                 <p className="text-xs text-muted-foreground">
-                  Switch back to a higher-priority node once it recovers.
+                  {t('failover.autoReturnDesc')}
                 </p>
               </div>
               <Switch
                 checked={draft.auto_return}
                 onCheckedChange={(v) => update({ auto_return: v })}
-                aria-label="Auto-return to primary"
+                aria-label={t('failover.autoReturn')}
               />
             </div>
           </CardContent>
@@ -388,20 +402,20 @@ export function FailoverPage() {
       <Card>
         <CardHeader className="flex-row items-center gap-2 space-y-0">
           <History className="h-4 w-4 text-muted-foreground" />
-          <CardTitle>Switch history</CardTitle>
+          <CardTitle>{t('failover.historyTitle')}</CardTitle>
         </CardHeader>
         <CardContent>
-          {draft.history.length === 0 ? (
+          {history.length === 0 ? (
             <EmptyState
               icon={History}
-              title="No failover events yet"
-              description="Route switches will appear here as they happen."
+              title={t('failover.noHistoryTitle')}
+              description={t('failover.noHistoryDesc')}
               className="py-8"
             />
           ) : (
             <ol className="space-y-0">
-              {draft.history.map((event, i) => {
-                const last = i === draft.history.length - 1
+              {history.map((event, i) => {
+                const last = i === history.length - 1
                 return (
                   <li key={i} className="relative flex gap-3 pb-5 last:pb-0">
                     {!last ? (

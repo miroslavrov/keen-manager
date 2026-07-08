@@ -9,8 +9,10 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
+import { useT } from '@/i18n'
 
 export function LoginPage() {
+  const t = useT()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -29,11 +31,11 @@ export function LoginPage() {
     mutationFn: () => api.login(password),
     onSuccess: () => {
       queryClient.invalidateQueries()
-      toast({ variant: 'success', title: 'Signed in' })
+      toast({ variant: 'success', title: t('login.signedIn') })
       navigate('/', { replace: true })
     },
     onError: () => {
-      setError('Incorrect password. Please try again.')
+      setError(t('login.error'))
     },
   })
 
@@ -41,7 +43,7 @@ export function LoginPage() {
     e.preventDefault()
     setError(null)
     if (!password) {
-      setError('Enter your password.')
+      setError(t('login.required'))
       return
     }
     login.mutate()
@@ -56,10 +58,10 @@ export function LoginPage() {
           </div>
           <div>
             <h1 className="text-lg font-semibold tracking-tight">
-              keen-manager
+              {t('login.title')}
             </h1>
             <p className="text-sm text-muted-foreground">
-              Sign in to the control panel
+              {t('login.subtitle')}
             </p>
           </div>
         </div>
@@ -68,7 +70,7 @@ export function LoginPage() {
           <CardContent className="pt-6">
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t('login.password')}</Label>
                 <div className="relative">
                   <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -96,14 +98,14 @@ export function LoginPage() {
                 {login.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : null}
-                Sign in
+                {login.isPending ? t('login.signingIn') : t('login.signIn')}
               </Button>
             </form>
           </CardContent>
         </Card>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          Local administration for your Keenetic router.
+          {t('login.caption')}
         </p>
       </div>
     </div>

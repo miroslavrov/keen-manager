@@ -5,6 +5,7 @@ import { NAV_ITEMS } from '@/lib/nav'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { useT } from '@/i18n'
 
 interface SidebarProps {
   className?: string
@@ -13,6 +14,7 @@ interface SidebarProps {
 
 /** Fixed left navigation — icon + label, with brand header and version footer. */
 export function Sidebar({ className, onNavigate }: SidebarProps) {
+  const t = useT()
   const { data: health } = useQuery({
     queryKey: ['health'],
     queryFn: api.health,
@@ -35,7 +37,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
             keen-manager
           </div>
           <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-            VPN / DPI control
+            {t('brand.subtitle')}
           </div>
         </div>
       </div>
@@ -68,7 +70,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
                         : 'text-muted-foreground group-hover:text-foreground',
                     )}
                   />
-                  <span className="truncate">{item.label}</span>
+                  <span className="truncate">{t(item.labelKey)}</span>
                 </>
               )}
             </NavLink>
