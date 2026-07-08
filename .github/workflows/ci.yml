@@ -1,0 +1,46 @@
+name: CI
+
+# Build, vet, test and cross-compile on every push / PR to main so a broken
+# commit is caught before it is tagged for release.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      # Build the front-end into internal/webui/dist so the go:embed matches the
+      # current sources (not just the committed bundle).
+      - name: Build front-end
+        run: make web
+
+      - name: Vet
+        run: make vet
+
+      - name: Test
+        run: make test
+
+      # Sanity check that every router target still cross-compiles.
+      - name: Cross-compile all targets
+        run: make build-all
