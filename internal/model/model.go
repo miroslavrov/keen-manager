@@ -204,6 +204,13 @@ type State struct {
 	ActiveConnID  string         `json:"active_conn_id"`
 	KillSwitch    bool           `json:"kill_switch"`
 	Version       int            `json:"schema_version"`
+
+	// NativeIfaces maps a connection ID to the KeeneticOS native Wireguard
+	// interface name (e.g. "Wireguard1") created for it via RCI import. It is
+	// present only for AWG connections brought up on the native AWG2 path
+	// (firmware >= 5.01.A.3); absent for the Entware userspace (awg-quick) path.
+	// Persisted so the interface can be torn down or reconciled after a restart.
+	NativeIfaces map[string]string `json:"native_ifaces,omitempty"`
 }
 
 // NfqwsStatusView is the UI-facing status of the nfqws2 service.

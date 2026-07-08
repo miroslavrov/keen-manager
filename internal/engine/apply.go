@@ -78,6 +78,11 @@ func (e *Engine) bringUp(c model.Connection) error {
 		if c.AWG == nil {
 			return fmt.Errorf("missing AmneziaWG config")
 		}
+		// Prefer the KeeneticOS native AWG2 path on capable firmware (5.1.0+);
+		// fall back to the Entware userspace awg-quick path otherwise.
+		if e.useNativeAWG() {
+			return e.awgNativeUp(c)
+		}
 		return e.awg.Up(awgIface(c.ID), c.AWG)
 	case model.ConnXray:
 		srv, ok := e.vault.get(c.ID)
@@ -98,6 +103,11 @@ func (e *Engine) bringUp(c model.Connection) error {
 func (e *Engine) bringDown(c model.Connection) error {
 	switch c.Type {
 	case model.ConnAWG:
+		// A recorded native interface means this tunnel was brought up via RCI
+		// import; tear it down the same way. Otherwise use the userspace path.
+		if _, native := e.nativeIface(c.ID); native {
+			return e.awgNativeDown(c.ID)
+		}
 		return e.awg.Down(awgIface(c.ID))
 	case model.ConnXray:
 		// Release TPROXY capture first so traffic is never sent to a dead proxy.
@@ -163,6 +173,19 @@ func (e *Engine) verifyActive(c model.Connection) bool {
 	const per = 6 * time.Second
 
 	for attempt := 1; time.Now().Before(deadline); attempt++ {
+		// Native AWG2: the authoritative signal is a recent peer handshake (a
+		// direct HTTP probe can pass over the WAN even when the tunnel is not
+		// yet the active route), so check it before falling back to HTTP.
+		if c.Type == model.ConnAWG {
+			if _, native := e.nativeIface(c.ID); native {
+				if e.awgNativeHealthy(c.ID) {
+					e.Logf("verify %s: native AWG2 tunnel established (attempt %d)", c.Name, attempt)
+					return true
+				}
+				time.Sleep(2 * time.Second)
+				continue
+			}
+		}
 		ctx, cancel := context.WithTimeout(e.baseCtx(), per)
 		var p health.Probe
 		switch c.Type {
@@ -263,9 +286,12 @@ func (e *Engine) probeConnection(st model.State, c model.Connection) model.Runti
 		rs.LatencyMs = p.LatencyMs
 	}
 
-	// AmneziaWG handshake age + traffic counters when the tunnel is up.
+	// AmneziaWG handshake age + traffic counters when the tunnel is up. Native
+	// interfaces report handshake age via RCI; userspace via `awg show`.
 	if c.Type == model.ConnAWG {
-		if h, err := e.awg.Show(awgIface(c.ID)); err == nil {
+		if age, native := e.nativeHandshakeAge(c.ID); native {
+			rs.HandshakeAge = age
+		} else if h, err := e.awg.Show(awgIface(c.ID)); err == nil {
 			rs.HandshakeAge = h.HandshakeAgeSec
 			rs.RxBytes = h.RxBytes
 			rs.TxBytes = h.TxBytes
@@ -291,6 +317,12 @@ func (e *Engine) probeConnection(st model.State, c model.Connection) model.Runti
 
 // verifyOnce is a single (non-retrying) end-to-end probe of the active path.
 func (e *Engine) verifyOnce(c model.Connection) bool {
+	// Native AWG2: use the peer-handshake signal (see verifyActive).
+	if c.Type == model.ConnAWG {
+		if _, native := e.nativeIface(c.ID); native {
+			return e.awgNativeHealthy(c.ID)
+		}
+	}
 	ctx, cancel := context.WithTimeout(e.baseCtx(), 6*time.Second)
 	defer cancel()
 	target := e.probeTarget()

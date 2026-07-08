@@ -16,6 +16,7 @@ import (
 
 	"github.com/miroslavrov/keen-manager/internal/awg"
 	"github.com/miroslavrov/keen-manager/internal/config"
+	"github.com/miroslavrov/keen-manager/internal/keenetic"
 	"github.com/miroslavrov/keen-manager/internal/model"
 	"github.com/miroslavrov/keen-manager/internal/nfqws"
 	"github.com/miroslavrov/keen-manager/internal/platform"
@@ -46,6 +47,11 @@ type Engine struct {
 	awg   *awg.Controller
 	nfqws *nfqws.Controller
 	route *route.Manager
+
+	// keenetic is the RCI client for the native AWG2 path; caps records what
+	// the firmware supports (filled best-effort at startup by detectKeenetic).
+	keenetic *keenetic.Client
+	caps     keenetic.Capabilities
 
 	mu      sync.RWMutex
 	runtime map[string]*model.RuntimeStatus // per-connection health, by conn ID
@@ -94,11 +100,14 @@ func New(paths platform.Paths, dryRun bool) (*Engine, error) {
 		awg:       awg.NewController(paths, runner),
 		nfqws:     nfqws.NewController(paths, runner),
 		route:     route.New(paths, runner),
+		keenetic:  keenetic.New(""),
 		runtime:   map[string]*model.RuntimeStatus{},
 		sessions:  map[string]time.Time{},
 		startTime: time.Now(),
 	}
 	runner.Log = func(cmd string) { e.logs.appendf("exec: %s", cmd) }
+	// Best-effort RCI probe: learns firmware release + native AWG2 support.
+	e.detectKeenetic()
 	e.logs.appendf("keen-manager %s ready (arch=%s os=%q dry-run=%v)",
 		version.Short(), e.Platform.Arch, e.Platform.OSVersion, dryRun)
 	return e, nil
