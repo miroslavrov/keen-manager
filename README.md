@@ -7,9 +7,11 @@ keen-manager brings **AmneziaWG**, **Xray** (with subscription support), and
 with automatic best-location selection, health checks, and **fallback chains** so
 your connection stays up even when a server is blocked or an operator rotates IPs.
 
-> Status: **early alpha / work in progress.** The Go core (subscription parsing,
-> Xray config generation, AWG config handling, health & failover logic) is
-> implemented and unit-tested. Device-side actions are built to be safe
+> Status: **early alpha / work in progress.** The full stack is implemented and
+> compiles to a single self-contained binary: the Go core (subscription
+> parsing, Xray config generation, AWG config handling, health & failover
+> logic), the daemon (REST/JSON API + SSE + embedded web UI), the CLI, and all
+> seven web UI pages. Device-side actions are built to be safe
 > (validate-before-apply, backups, rollback) but **must be tested on real
 > hardware before you trust them on a router you can't physically reach.**
 
@@ -145,7 +147,7 @@ their own upstreams, under their own terms): the `nfqws2` daemon
 
 ## Roadmap
 
-- [ ] Finish web UI feature pages (dashboard, connections, subscriptions, bypass, failover, logs, settings)
+- [x] Finish web UI feature pages (dashboard, connections, subscriptions, bypass, failover, logs, settings)
 - [ ] Xray gRPC hot-reload (swap outbounds without a full restart)
 - [ ] Policy-based routing per device group (Keenetic policy fwmark integration)
 - [ ] IPK packaging + hosted opkg feed
