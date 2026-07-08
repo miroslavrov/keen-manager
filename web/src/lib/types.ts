@@ -135,6 +135,7 @@ export interface Settings {
   backup_on_change: boolean
   rollback_timeout_s: number
   kill_switch_default: boolean
+  auto_select_interval_min: number
   platform: Platform
 }
 

@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
 
 import { AppLayout } from '@/components/AppLayout'
 import { RequireAuth } from '@/components/RequireAuth'
@@ -30,9 +30,10 @@ export default function App() {
         <Route path="/failover" element={<FailoverPage />} />
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/404" element={<NotFoundPage />} />
-        <Route path="*" element={<Navigate to="/404" replace />} />
       </Route>
+      {/* Public catch-all: unknown URLs render the 404 page regardless of auth
+          state (it lives outside the RequireAuth gate on purpose). */}
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   )
 }

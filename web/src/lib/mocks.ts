@@ -398,6 +398,7 @@ export const mockSettings: Settings = {
   backup_on_change: true,
   rollback_timeout_s: 90,
   kill_switch_default: false,
+  auto_select_interval_min: 30,
   platform: {
     arch: 'mipsel',
     os_version: 'KeeneticOS 4.2.3',

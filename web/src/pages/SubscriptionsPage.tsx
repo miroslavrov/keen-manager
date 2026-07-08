@@ -220,26 +220,32 @@ function SubscriptionCard({
 
   const autoMutation = useMutation({
     mutationFn: (next: boolean) =>
-      api.createSubscription({ name: sub.name, url: sub.url }).then(() => ({
-        ok: true,
-        next,
-      })),
-    // Note: there is no dedicated update endpoint; we optimistically reflect
-    // the toggle locally so the control is responsive.
+      api.updateSubscription(sub.id, { auto_select_best: next }),
+    // Optimistically reflect the toggle so the control feels instant; roll back
+    // to the previous cache if the request fails.
     onMutate: (next: boolean) => {
-      queryClient.setQueryData<Sub[] | undefined>(['subscriptions'], (prev) =>
-        prev?.map((s) =>
+      const prev = queryClient.getQueryData<Sub[]>(['subscriptions'])
+      queryClient.setQueryData<Sub[] | undefined>(['subscriptions'], (cur) =>
+        cur?.map((s) =>
           s.id === sub.id ? { ...s, auto_select_best: next } : s,
         ),
       )
+      return { prev }
     },
-    onSuccess: (res) => {
+    onError: (_err, _next, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['subscriptions'], ctx.prev)
+      toast({ variant: 'error', title: 'Could not update auto-select best' })
+    },
+    onSuccess: (updated) => {
       toast({
         variant: 'success',
-        title: res.next
+        title: updated.auto_select_best
           ? 'Auto-select best enabled'
           : 'Auto-select best disabled',
       })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
     },
   })
 

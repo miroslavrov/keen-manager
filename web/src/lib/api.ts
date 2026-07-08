@@ -208,6 +208,19 @@ export const api = {
       }),
     ),
 
+  updateSubscription: (
+    id: string,
+    body: Partial<{ name: string; auto_select_best: boolean; update_interval_hours: number }>,
+  ) =>
+    withOk<Sub>(
+      () => request(`/subscriptions/${id}`, { method: 'PUT', body }),
+      () =>
+        ({
+          ...(mocks.mockSubscriptions.find((s) => s.id === id) ?? mocks.mockSubscriptions[0]),
+          ...body,
+        }) as Sub,
+    ),
+
   refreshSubscription: (id: string) =>
     withOk<Sub>(
       () => request(`/subscriptions/${id}/refresh`, { method: 'POST' }),
