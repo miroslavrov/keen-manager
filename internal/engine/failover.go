@@ -185,6 +185,12 @@ func (e *Engine) nodeReachable(connID string) bool {
 		return false
 	}
 	host, port := endpointHostPort(c)
+	// AWG endpoints are UDP; a TCP ping is meaningless, so treat an AWG node
+	// that has an endpoint as eligible and let Activate's handshake verify
+	// decide. Otherwise AWG fallback nodes would never be selected at all.
+	if c.Type == model.ConnAWG {
+		return host != ""
+	}
 	if host == "" || port == 0 {
 		return false
 	}

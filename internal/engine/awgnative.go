@@ -175,6 +175,70 @@ func (e *Engine) awgNativeHealthy(connID string) bool {
 	return false
 }
 
+// reconcile re-establishes the connection that was active before a daemon
+// restart or router reboot. It no-ops when the active tunnel is already healthy
+// (e.g. a native interface restored from KeeneticOS startup-config), so a
+// routine daemon restart never churns a working tunnel.
+func (e *Engine) reconcile() {
+	if e.runner.DryRun {
+		return
+	}
+	st := e.store.Get()
+	id := st.ActiveConnID
+	if id == "" {
+		return
+	}
+	c, ok := findConn(st, id)
+	if !ok || !c.Enabled {
+		e.Logf("reconcile: previously-active connection %q is gone or disabled", id)
+		return
+	}
+	if e.verifyOnce(c) {
+		e.setRuntime(id, model.RuntimeStatus{ConnID: id, Status: model.StatusUp, Active: true, LastCheck: time.Now()})
+		e.Logf("reconcile: active connection %s already healthy after restart", c.Name)
+		return
+	}
+	e.Logf("reconcile: re-activating %s after restart", c.Name)
+	if err := e.Activate(id); err != nil {
+		e.Logf("reconcile: re-activate %s failed: %v", c.Name, err)
+	}
+}
+
+// probeAWG computes runtime status for an AmneziaWG connection. AWG endpoints
+// are UDP, so (unlike Xray) a TCP ping says nothing — liveness comes from the
+// WireGuard handshake: via RCI InterfaceStatus on the native path, or `awg
+// show` on the userspace path.
+func (e *Engine) probeAWG(c model.Connection, rs model.RuntimeStatus) model.RuntimeStatus {
+	age := -1
+	if a, native := e.nativeHandshakeAge(c.ID); native {
+		age = a
+	} else if h, err := e.awg.Show(awgIface(c.ID)); err == nil {
+		age = h.HandshakeAgeSec
+		rs.RxBytes = h.RxBytes
+		rs.TxBytes = h.TxBytes
+	}
+	if age >= 0 {
+		rs.HandshakeAge = age
+	}
+	switch {
+	case rs.Active:
+		if e.verifyOnce(c) {
+			rs.Status = model.StatusUp
+		} else {
+			rs.Status = model.StatusDegraded
+			rs.Message = "tunnel handshake stale"
+		}
+	case age > 0 && age <= nativeHandshakeWindowS:
+		rs.Status = model.StatusUp
+	default:
+		// A non-active AWG tunnel isn't running, so its UDP endpoint can't be
+		// cheaply probed; report standby rather than a misleading "down".
+		rs.Status = model.StatusUnknown
+		rs.Message = "standby"
+	}
+	return rs
+}
+
 // nativeHandshakeAge returns the newest online peer's handshake age (seconds)
 // for a connection's native interface. The bool reports whether the connection
 // is on the native path at all (so callers can fall back to awg-quick's

@@ -276,6 +276,14 @@ func (e *Engine) probeConnection(st model.State, c model.Connection) model.Runti
 		return rs
 	}
 
+	// AWG endpoints are UDP — a TCP ping to them is meaningless — so AWG uses
+	// WireGuard handshake liveness instead of the endpoint TCP probe that Xray
+	// (TCP-based) relies on. Without this an active, healthy AWG tunnel would
+	// always read as "down" because its UDP port never answers a TCP connect.
+	if c.Type == model.ConnAWG {
+		return e.probeAWG(c, rs)
+	}
+
 	host, port := endpointHostPort(c)
 	reachable := false
 	if host != "" && port > 0 {
@@ -284,18 +292,6 @@ func (e *Engine) probeConnection(st model.State, c model.Connection) model.Runti
 		cancel()
 		reachable = p.OK
 		rs.LatencyMs = p.LatencyMs
-	}
-
-	// AmneziaWG handshake age + traffic counters when the tunnel is up. Native
-	// interfaces report handshake age via RCI; userspace via `awg show`.
-	if c.Type == model.ConnAWG {
-		if age, native := e.nativeHandshakeAge(c.ID); native {
-			rs.HandshakeAge = age
-		} else if h, err := e.awg.Show(awgIface(c.ID)); err == nil {
-			rs.HandshakeAge = h.HandshakeAgeSec
-			rs.RxBytes = h.RxBytes
-			rs.TxBytes = h.TxBytes
-		}
 	}
 
 	switch {

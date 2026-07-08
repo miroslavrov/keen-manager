@@ -118,6 +118,17 @@ func New(paths platform.Paths, dryRun bool) (*Engine, error) {
 func (e *Engine) Start(ctx context.Context) {
 	e.ctx, e.cancel = context.WithCancel(ctx)
 	e.startLoops()
+	// Boot reconciliation: after a daemon restart or router reboot, re-establish
+	// whichever connection was active before, so the tunnel comes back on its
+	// own (uninterrupted-connection promise). Runs off the hot path.
+	go func() {
+		select {
+		case <-e.ctx.Done():
+			return
+		case <-time.After(3 * time.Second): // let the WAN settle first
+		}
+		e.reconcile()
+	}()
 }
 
 // Stop cancels the loops and waits for them to finish.
