@@ -82,7 +82,7 @@ mkdir -p "$TMP"
 KEEN_DRY_RUN=1 KEEN_DATA_DIR="$TMP" KEEN_LISTEN="127.0.0.1:${PORT}" "$BIN" daemon >"$TMP/daemon.log" 2>&1 &
 DPID=$!
 # Wait for it to answer.
-i=0; while [ "$i" -lt 20 ]; do get /api/health >/dev/null 2>&1 && break; i=$((i+1)); sleep 0.3; done
+i=0; while [ "$i" -lt 15 ]; do get /api/health >/dev/null 2>&1 && break; i=$((i+1)); sleep 1; done
 
 echo "health:   $(get /api/health)"
 echo "state:    $(get /api/state | cut -c1-200)"
