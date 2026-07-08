@@ -130,13 +130,43 @@ case "$ARCH" in
 esac
 log "detected architecture: ${ARCH}"
 
+# --- Resolve the newest release tag (including pre-releases) ----------------
+# GitHub's /releases/latest/download/ redirect ONLY points at the newest *full*
+# release, so a project that has published only pre-releases (betas) 404s there.
+# Query the API (results are newest-first and DO include pre-releases) and take
+# the first tag_name. POSIX sed only, so it works under busybox.
+resolve_latest_tag() {
+	_api="https://api.github.com/repos/${REPO}/releases?per_page=1"
+	if [ "$DL" = "curl" ]; then
+		_json=$(curl -fsSL -H "Accept: application/vnd.github+json" "$_api" 2>/dev/null)
+	else
+		_json=$(wget -qO- --header="Accept: application/vnd.github+json" "$_api" 2>/dev/null)
+	fi
+	[ -n "$_json" ] || return 1
+	printf '%s\n' "$_json" | grep '"tag_name"' | head -n1 \
+		| sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//; s/".*//'
+}
+
 # --- Resolve download URL ---------------------------------------------------
 if [ -n "$KEEN_URL" ]; then
 	URL="$KEEN_URL"
-elif [ "$KEEN_VERSION" = "latest" ]; then
-	URL="https://github.com/${REPO}/releases/latest/download/keen-manager-${ARCH}.gz"
 else
-	URL="https://github.com/${REPO}/releases/download/${KEEN_VERSION}/keen-manager-${ARCH}.gz"
+	if [ "$KEEN_VERSION" = "latest" ]; then
+		# Prefer the API (handles pre-release-only repos); fall back to the
+		# redirect path if the API is unreachable.
+		_tag=$(resolve_latest_tag || true)
+		if [ -n "$_tag" ]; then
+			log "latest release: ${_tag}"
+			KEEN_VERSION="$_tag"
+		else
+			warn "could not query the GitHub API for the latest release; trying the redirect path"
+		fi
+	fi
+	if [ "$KEEN_VERSION" = "latest" ]; then
+		URL="https://github.com/${REPO}/releases/latest/download/keen-manager-${ARCH}.gz"
+	else
+		URL="https://github.com/${REPO}/releases/download/${KEEN_VERSION}/keen-manager-${ARCH}.gz"
+	fi
 fi
 log "downloading ${URL}"
 
