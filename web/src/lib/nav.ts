@@ -6,6 +6,7 @@ import {
   Radio,
   ScrollText,
   Settings,
+  Waypoints,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -38,6 +39,12 @@ export const NAV_ITEMS: NavItem[] = [
     labelKey: 'nav.subscriptions',
     descKey: 'nav.subscriptionsDesc',
     icon: Globe,
+  },
+  {
+    to: '/routes',
+    labelKey: 'nav.routes',
+    descKey: 'nav.routesDesc',
+    icon: Waypoints,
   },
   {
     to: '/bypass',

@@ -5,6 +5,7 @@
 // подмешиваются ниже, чтобы переводы каждой страницы жили изолированно.
 import { connections } from './pages/connections'
 import { subscriptions } from './pages/subscriptions'
+import { routes } from './pages/routes'
 import { bypass } from './pages/bypass'
 import { dashboard } from './pages/dashboard'
 import { settings } from './pages/settings'
@@ -13,6 +14,7 @@ import { logs } from './pages/logs'
 export const ru = {
   connections: connections.ru,
   subscriptions: subscriptions.ru,
+  routes: routes.ru,
   bypass: bypass.ru,
   dashboard: dashboard.ru,
   settings: settings.ru,
@@ -34,6 +36,8 @@ export const ru = {
     connectionsDesc: 'Туннели AmneziaWG и Xray',
     subscriptions: 'Подписки',
     subscriptionsDesc: 'Ленты подписок',
+    routes: 'Маршруты',
+    routesDesc: 'Маршрутизация доменов по сервисам',
     bypass: 'Обход',
     bypassDesc: 'Обход DPI через nfqws2',
     failover: 'Отказоустойчивость',
@@ -185,6 +189,8 @@ export const ru = {
     connectionsDesc: 'Туннели AmneziaWG и Xray.',
     subscriptionsTitle: 'Подписки',
     subscriptionsDesc: 'Импорт серверов по ссылке подписки.',
+    routesTitle: 'Маршруты',
+    routesDesc: 'Маршрутизация доменов по сервисам через выбранный туннель.',
     bypassTitle: 'Обход',
     bypassDesc: 'Сервис обхода DPI nfqws2, стратегии и списки.',
     logsTitle: 'Логи',

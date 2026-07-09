@@ -24,12 +24,26 @@ export interface Conn {
   fallback_to?: string
 }
 
+/** How a connection surfaces on the router (answer to "why don't I see it in
+ * the Keenetic UI?"). Mirrors engine.IntegrationView. */
+export interface Integration {
+  /** "native-interface" | "userspace-awg" | "transparent-proxy". */
+  mode: string
+  visible_in_router: boolean
+  /** Native NDMS interface name once up (e.g. "Wireguard1"); empty otherwise. */
+  interface?: string
+  summary: string
+  /** Only native interfaces can back a dns-proxy route (Routes target). */
+  routable_target: boolean
+}
+
 export interface ConnDetail extends Conn {
   config_preview?: string
   handshake_age_s?: number
   rx_bytes?: number
   tx_bytes?: number
   protocol?: string
+  integration?: Integration
 }
 
 export interface Server {
@@ -77,6 +91,36 @@ export interface NfqwsConfig {
   mode: NfqwsMode
 }
 
+/** Structured nfqws2.conf, mirrors internal/nfqws.Conf. Only the fields the
+ * form edits are typed; the round-trip parser preserves everything else. */
+export interface NfqwsConf {
+  isp_interface: string
+  nfqws_base_args: string
+  nfqws_args: string
+  nfqws_args_quic: string
+  nfqws_args_udp: string
+  nfqws_args_ipset: string
+  nfqws_args_custom: string
+  /** Active mode macro, e.g. "$MODE_AUTO". */
+  nfqws_extra_args: string
+  tcp_ports: string
+  udp_ports: string
+  policy_name: string
+  policy_exclude: number
+  nfqueue_num: number
+  log_level: number
+  ipv6_enabled: boolean
+}
+
+/** Result of resolving a remote domain-list URL (v2fly / plain / hosts). */
+export interface ListResolveResult {
+  domains: string[]
+  skipped: string[]
+  sources: string[]
+  truncated: boolean
+  skipped_n: number
+}
+
 export interface NfqwsList {
   name: string
   content: string
@@ -105,6 +149,42 @@ export interface Failover {
   auto_return: boolean
   probe_target: string
   history: FailoverEvent[]
+}
+
+// ----- Routes / "Маршруты" (per-service domain routing) -----
+
+/** One configured service route. Mirrors engine.RouteView. */
+export interface RouteEntry {
+  id: string
+  name: string
+  preset_id?: string
+  category?: string
+  icon?: string
+  domain_count: number
+  subnet_count: number
+  target_conn_id: string
+  target_name?: string
+  target_iface?: string
+  enabled: boolean
+  applied: boolean
+  note?: string
+}
+
+/** One entry in the built-in service catalog. Mirrors engine.PresetView. */
+export interface Preset {
+  id: string
+  name: string
+  category: string
+  icon?: string
+  notice?: string
+  domain_count: number
+  subnet_count: number
+  has_subscription: boolean
+}
+
+export interface PresetCatalog {
+  categories: string[]
+  presets: Preset[]
 }
 
 export interface Wan {

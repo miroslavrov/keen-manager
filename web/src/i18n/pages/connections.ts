@@ -52,6 +52,17 @@ export const connections = {
     endpoint: 'Endpoint',
     configPreview: 'Config preview',
     lastChecked: 'Last checked {time}',
+
+    // Integration panel — "why don't I see this in the router UI?"
+    integrationTitle: 'Router integration',
+    visibleInRouter: 'Visible in router',
+    invisibleInRouter: 'Not a router interface',
+    integrationInterface: 'Interface',
+    integrationModeNative: 'Native AmneziaWG interface',
+    integrationModeUserspace: 'Userspace AmneziaWG',
+    integrationModeProxy: 'Transparent proxy',
+    routableTargetYes: 'Can be a Routes target',
+    routableTargetNo: 'Use the Routes tab or a policy',
   },
   ru: {
     title: 'Подключения',
@@ -104,5 +115,16 @@ export const connections = {
     endpoint: 'Адрес узла',
     configPreview: 'Предпросмотр конфига',
     lastChecked: 'Проверено {time}',
+
+    // Панель интеграции — «почему я не вижу это в морде роутера?»
+    integrationTitle: 'Интеграция с роутером',
+    visibleInRouter: 'Виден в роутере',
+    invisibleInRouter: 'Не является интерфейсом роутера',
+    integrationInterface: 'Интерфейс',
+    integrationModeNative: 'Нативный интерфейс AmneziaWG',
+    integrationModeUserspace: 'AmneziaWG в userspace',
+    integrationModeProxy: 'Прозрачный прокси',
+    routableTargetYes: 'Может быть целью в Маршрутах',
+    routableTargetNo: 'Используйте вкладку Маршруты или политику',
   },
 }

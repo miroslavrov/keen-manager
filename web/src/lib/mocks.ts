@@ -12,7 +12,10 @@ import type {
   Health,
   LogResponse,
   Nfqws,
+  NfqwsConf,
   NfqwsConfig,
+  PresetCatalog,
+  RouteEntry,
   Server,
   Settings,
   Sub,
@@ -159,6 +162,14 @@ export const mockConnDetails: Record<string, ConnDetail> = {
     handshake_age_s: 24,
     rx_bytes: 8_643_221_004,
     tx_bytes: 1_204_889_311,
+    integration: {
+      mode: 'native-interface',
+      visible_in_router: true,
+      interface: 'Wireguard1',
+      routable_target: true,
+      summary:
+        'Runs as a native AmneziaWG interface (Wireguard1) — visible in the Keenetic UI and usable as a Routes target.',
+    },
     config_preview: `[Interface]
 Address = 10.13.13.2/32
 DNS = 1.1.1.1
@@ -180,6 +191,13 @@ PersistentKeepalive = 25`,
     protocol: 'VLESS + REALITY',
     rx_bytes: 2_118_004_552,
     tx_bytes: 402_113_900,
+    integration: {
+      mode: 'transparent-proxy',
+      visible_in_router: false,
+      routable_target: false,
+      summary:
+        'Xray captures traffic transparently (TPROXY) — by design it does NOT appear as an interface in the Keenetic UI. Send services through it with the Routes tab or a policy.',
+    },
     config_preview: `{
   "protocol": "vless",
   "address": "45.132.207.14",
@@ -343,6 +361,76 @@ HOSTLIST=user.list
 # Frag/desync tuning
 DESYNC_MARK=0x40000000
 FLOW_OFFLOAD=none`,
+}
+
+export const mockNfqwsConf: NfqwsConf = {
+  isp_interface: '',
+  nfqws_base_args: '--qnum=200',
+  nfqws_args:
+    '--dpi-desync=fake,split2 --dpi-desync-ttl=6 --dpi-desync-fooling=badseq',
+  nfqws_args_quic: '--dpi-desync=fake --dpi-desync-repeats=6',
+  nfqws_args_udp: '',
+  nfqws_args_ipset: '',
+  nfqws_args_custom: '',
+  nfqws_extra_args: '$MODE_AUTO',
+  tcp_ports: '80,443',
+  udp_ports: '443,50000-50100',
+  policy_name: '',
+  policy_exclude: 0,
+  nfqueue_num: 200,
+  log_level: 0,
+  ipv6_enabled: false,
+}
+
+export const mockRoutes: RouteEntry[] = [
+  {
+    id: 'route-youtube',
+    name: 'YouTube',
+    preset_id: 'youtube',
+    category: 'media',
+    icon: 'youtube',
+    domain_count: 11,
+    subnet_count: 0,
+    target_conn_id: 'awg-nl-ams',
+    target_name: 'Amnezia NL-1',
+    target_iface: 'Wireguard1',
+    enabled: true,
+    applied: true,
+  },
+  {
+    id: 'route-openai',
+    name: 'OpenAI · ChatGPT',
+    preset_id: 'openai',
+    category: 'ai',
+    icon: 'openai',
+    domain_count: 7,
+    subnet_count: 0,
+    target_conn_id: 'awg-nl-ams',
+    target_name: 'Amnezia NL-1',
+    target_iface: 'Wireguard1',
+    enabled: true,
+    applied: false,
+    note: 'target has no native interface yet — activate its AmneziaWG connection',
+  },
+]
+
+export const mockPresetCatalog: PresetCatalog = {
+  categories: ['social', 'media', 'ai', 'gaming', 'developer', 'cloud', 'block'],
+  presets: [
+    { id: 'youtube', name: 'YouTube', category: 'media', icon: 'youtube', domain_count: 11, subnet_count: 0, has_subscription: false },
+    { id: 'instagram', name: 'Instagram', category: 'social', icon: 'instagram', domain_count: 9, subnet_count: 0, has_subscription: false },
+    { id: 'telegram', name: 'Telegram', category: 'social', icon: 'telegram', domain_count: 6, subnet_count: 4, has_subscription: false },
+    { id: 'x', name: 'X · Twitter', category: 'social', icon: 'x', domain_count: 5, subnet_count: 0, has_subscription: false },
+    { id: 'discord', name: 'Discord', category: 'social', icon: 'discord', domain_count: 6, subnet_count: 12, has_subscription: false },
+    { id: 'openai', name: 'OpenAI · ChatGPT', category: 'ai', icon: 'openai', domain_count: 7, subnet_count: 0, has_subscription: false },
+    { id: 'anthropic', name: 'Anthropic · Claude', category: 'ai', icon: 'anthropic', domain_count: 4, subnet_count: 0, has_subscription: false },
+    { id: 'netflix', name: 'Netflix', category: 'media', icon: 'netflix', domain_count: 12, subnet_count: 0, has_subscription: false },
+    { id: 'spotify', name: 'Spotify', category: 'media', icon: 'spotify', domain_count: 8, subnet_count: 0, has_subscription: false },
+    { id: 'steam', name: 'Steam', category: 'gaming', icon: 'steam', domain_count: 10, subnet_count: 0, has_subscription: false },
+    { id: 'github', name: 'GitHub', category: 'developer', icon: 'github', domain_count: 14, subnet_count: 0, has_subscription: false },
+    { id: 'cloudflare', name: 'Cloudflare', category: 'cloud', icon: 'cloudflare', domain_count: 30, subnet_count: 6, has_subscription: false },
+    { id: 'all-blocked', name: 'All RKN-blocked (itdog)', category: 'block', icon: 'rkn', domain_count: 0, subnet_count: 0, has_subscription: true },
+  ],
 }
 
 export const mockLists: string[] = [

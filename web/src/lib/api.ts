@@ -19,12 +19,16 @@ import type {
   DomainCheck,
   Failover,
   Health,
+  ListResolveResult,
   LogResponse,
   LogService,
   Nfqws,
+  NfqwsConf,
   NfqwsConfig,
   NfqwsList,
   Ok,
+  PresetCatalog,
+  RouteEntry,
   Server,
   Settings,
   Sub,
@@ -260,6 +264,55 @@ export const api = {
       () => ({ ok: true, selected_id: mocks.mockServers[id]?.[0]?.id }),
     ),
 
+  // ---- routes / "Маршруты" ----
+  routes: () =>
+    withMock<RouteEntry[]>(() => request('/routes'), () => mocks.mockRoutes),
+
+  routePresets: () =>
+    withMock<PresetCatalog>(
+      () => request('/routes/presets'),
+      () => mocks.mockPresetCatalog,
+    ),
+
+  createRoute: (body: {
+    name?: string
+    preset_id?: string
+    domains?: string[]
+    subnets?: string[]
+    target_conn_id: string
+  }) =>
+    withOk<RouteEntry>(
+      () => request('/routes', { method: 'POST', body }),
+      () => ({
+        id: `route-${Date.now()}`,
+        name: body.name ?? body.preset_id ?? 'Custom route',
+        preset_id: body.preset_id,
+        domain_count: body.domains?.length ?? 0,
+        subnet_count: body.subnets?.length ?? 0,
+        target_conn_id: body.target_conn_id,
+        enabled: true,
+        applied: false,
+      }),
+    ),
+
+  toggleRoute: (id: string, enabled: boolean) =>
+    withOk<Ok>(
+      () => request(`/routes/${id}/toggle`, { method: 'PUT', body: { enabled } }),
+      { ok: true },
+    ),
+
+  deleteRoute: (id: string) =>
+    withOk<Ok>(() => request(`/routes/${id}`, { method: 'DELETE' }), {
+      ok: true,
+    }),
+
+  // ---- remote list resolution (v2fly / plain / hosts) ----
+  resolveList: (url: string, attr?: string) =>
+    withOk<ListResolveResult>(
+      () => request('/lists/resolve', { method: 'POST', body: { url, attr } }),
+      () => ({ domains: [], skipped: [], sources: [], truncated: false, skipped_n: 0 }),
+    ),
+
   // ---- nfqws2 ----
   nfqws: () => withMock<Nfqws>(() => request('/nfqws'), () => mocks.mockNfqws),
 
@@ -280,6 +333,18 @@ export const api = {
   saveNfqwsConfig: (body: Partial<NfqwsConfig>) =>
     withOk<Ok>(
       () => request('/nfqws/config', { method: 'PUT', body }),
+      { ok: true },
+    ),
+
+  nfqwsConfigStructured: () =>
+    withMock<NfqwsConf>(
+      () => request('/nfqws/config/structured'),
+      () => mocks.mockNfqwsConf,
+    ),
+
+  saveNfqwsConfigStructured: (body: Partial<NfqwsConf>) =>
+    withOk<Ok>(
+      () => request('/nfqws/config/structured', { method: 'PUT', body }),
       { ok: true },
     ),
 

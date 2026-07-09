@@ -39,6 +39,32 @@ export const bypass = {
     configSavedDesc: 'Reload the service to apply changes.',
     configSaveError: 'Could not save config',
 
+    // Config sub-tabs (structured form vs raw)
+    subForm: 'Form',
+    subAdvanced: 'Advanced (raw)',
+    formHint:
+      'Typed nfqws2.conf fields. Unlisted keys, comments and untouched strategy blocks are preserved byte-for-byte.',
+    sectionMode: 'Mode & ports',
+    sectionStrategy: 'DPI-desync strategy',
+    sectionAdvanced: 'Advanced',
+    fieldTcpPorts: 'TCP ports',
+    fieldUdpPorts: 'UDP ports',
+    fieldArgsTcp: 'TCP strategy args',
+    fieldArgsQuic: 'QUIC strategy args',
+    fieldArgsUdp: 'UDP strategy args',
+    fieldBaseArgs: 'Base args',
+    fieldCustomArgs: 'Custom args',
+    fieldIpsetArgs: 'ipset args',
+    fieldIspInterface: 'ISP interface',
+    fieldIspInterfacePlaceholder: 'auto-detect if empty',
+    fieldPolicyName: 'Keenetic policy',
+    fieldPolicyExclude: 'Policy exclude',
+    fieldNfqueue: 'NFQUEUE number',
+    fieldLogLevel: 'Log level',
+    fieldIpv6: 'IPv6 processing',
+    fieldIpv6Desc: 'Also intercept IPv6 traffic.',
+    argsPlaceholder: '--dpi-desync=fake,split2 --dpi-desync-ttl=6',
+
     // Hostlists manager
     emptyListsTitle: 'No hostlists',
     emptyListsDesc: 'nfqws2 has no managed hostlists on this device.',
@@ -47,6 +73,28 @@ export const bypass = {
     hostlistSavedDesc: '{name} updated.',
     hostlistSaveError: 'Could not save hostlist',
     hostlistPlaceholder: '# one domain or CIDR per line',
+
+    // Import into a hostlist (v2fly / plain / hosts URL)
+    importList: 'Import from URL',
+    importListTitle: 'Import domains into {name}',
+    importListDesc:
+      'Paste a v2fly domain-list, a plain list, or a hosts/AdBlock URL. include: directives and @attribute tags expand automatically.',
+    importUrlLabel: 'List URL',
+    importUrlPlaceholder:
+      'https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/youtube',
+    importAttrLabel: 'Attribute filter (optional)',
+    importAttrPlaceholder: 'e.g. cn, ads — empty = all',
+    importModeAppend: 'Append to list',
+    importModeReplace: 'Replace list',
+    importRun: 'Fetch & merge',
+    importRunning: 'Fetching…',
+    importDone: 'Imported {count} domains from {sources} source(s)',
+    importDoneSkipped: '{count} entries skipped (keyword/regexp).',
+    importDoneTrunc: 'Truncated at the safety cap.',
+    importFailed: 'Could not fetch or parse that list.',
+    importNoDomains: 'No usable domains in that list.',
+    importChunkNote:
+      'Keenetic caps a single list at ~100 lines — huge lists are best split across several list files.',
 
     // Domain checker
     checkTitle: 'Domain reachability',
@@ -103,6 +151,32 @@ export const bypass = {
     configSavedDesc: 'Перечитай сервис, чтобы применить изменения.',
     configSaveError: 'Не удалось сохранить конфигурацию',
 
+    // Config sub-tabs (structured form vs raw)
+    subForm: 'Форма',
+    subAdvanced: 'Расширенно (raw)',
+    formHint:
+      'Типизированные поля nfqws2.conf. Прочие ключи, комментарии и нетронутые блоки стратегий сохраняются байт-в-байт.',
+    sectionMode: 'Режим и порты',
+    sectionStrategy: 'Стратегия десинхронизации DPI',
+    sectionAdvanced: 'Дополнительно',
+    fieldTcpPorts: 'TCP-порты',
+    fieldUdpPorts: 'UDP-порты',
+    fieldArgsTcp: 'Аргументы стратегии TCP',
+    fieldArgsQuic: 'Аргументы стратегии QUIC',
+    fieldArgsUdp: 'Аргументы стратегии UDP',
+    fieldBaseArgs: 'Базовые аргументы',
+    fieldCustomArgs: 'Свои аргументы',
+    fieldIpsetArgs: 'Аргументы ipset',
+    fieldIspInterface: 'Интерфейс провайдера',
+    fieldIspInterfacePlaceholder: 'автоопределение, если пусто',
+    fieldPolicyName: 'Политика Keenetic',
+    fieldPolicyExclude: 'Исключение политики',
+    fieldNfqueue: 'Номер NFQUEUE',
+    fieldLogLevel: 'Уровень логов',
+    fieldIpv6: 'Обработка IPv6',
+    fieldIpv6Desc: 'Также перехватывать трафик IPv6.',
+    argsPlaceholder: '--dpi-desync=fake,split2 --dpi-desync-ttl=6',
+
     // Hostlists manager
     emptyListsTitle: 'Нет списков хостов',
     emptyListsDesc: 'На этом устройстве у nfqws2 нет управляемых списков хостов.',
@@ -111,6 +185,28 @@ export const bypass = {
     hostlistSavedDesc: '{name} обновлён.',
     hostlistSaveError: 'Не удалось сохранить список хостов',
     hostlistPlaceholder: '# один домен или CIDR на строку',
+
+    // Импорт в список хостов (URL v2fly / plain / hosts)
+    importList: 'Импорт из URL',
+    importListTitle: 'Импорт доменов в {name}',
+    importListDesc:
+      'Вставьте v2fly domain-list, обычный список или hosts/AdBlock URL. Директивы include: и теги @attribute разворачиваются автоматически.',
+    importUrlLabel: 'URL списка',
+    importUrlPlaceholder:
+      'https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/youtube',
+    importAttrLabel: 'Фильтр по атрибуту (необязательно)',
+    importAttrPlaceholder: 'напр. cn, ads — пусто = все',
+    importModeAppend: 'Добавить в список',
+    importModeReplace: 'Заменить список',
+    importRun: 'Загрузить и слить',
+    importRunning: 'Загрузка…',
+    importDone: 'Импортировано {count} доменов из {sources} источник(ов)',
+    importDoneSkipped: 'Пропущено записей: {count} (keyword/regexp).',
+    importDoneTrunc: 'Обрезано по защитному лимиту.',
+    importFailed: 'Не удалось загрузить или разобрать список.',
+    importNoDomains: 'В списке нет пригодных доменов.',
+    importChunkNote:
+      'Keenetic ограничивает один список ~100 строками — очень большие списки лучше разбивать на несколько файлов.',
 
     // Domain checker
     checkTitle: 'Доступность домена',

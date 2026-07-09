@@ -5,6 +5,7 @@
 // spread in below, so each page's translations can evolve in isolation.
 import { connections } from './pages/connections'
 import { subscriptions } from './pages/subscriptions'
+import { routes } from './pages/routes'
 import { bypass } from './pages/bypass'
 import { dashboard } from './pages/dashboard'
 import { settings } from './pages/settings'
@@ -13,6 +14,7 @@ import { logs } from './pages/logs'
 export const en = {
   connections: connections.en,
   subscriptions: subscriptions.en,
+  routes: routes.en,
   bypass: bypass.en,
   dashboard: dashboard.en,
   settings: settings.en,
@@ -34,6 +36,8 @@ export const en = {
     connectionsDesc: 'AmneziaWG & Xray tunnels',
     subscriptions: 'Subscriptions',
     subscriptionsDesc: 'Subscription feeds',
+    routes: 'Routes',
+    routesDesc: 'Per-service domain routing',
     bypass: 'Bypass',
     bypassDesc: 'nfqws2 DPI bypass',
     failover: 'Failover',
@@ -183,6 +187,8 @@ export const en = {
     connectionsDesc: 'AmneziaWG & Xray tunnels.',
     subscriptionsTitle: 'Subscriptions',
     subscriptionsDesc: 'Import servers from a subscription URL.',
+    routesTitle: 'Routes',
+    routesDesc: 'Per-service domain routing through a chosen tunnel.',
     bypassTitle: 'Bypass',
     bypassDesc: 'nfqws2 DPI-bypass service, strategies and lists.',
     logsTitle: 'Logs',

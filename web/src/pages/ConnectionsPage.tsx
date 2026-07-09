@@ -4,14 +4,18 @@ import {
   Activity,
   ArrowDownCircle,
   ArrowUpCircle,
+  Eye,
+  EyeOff,
   Gauge,
   Loader2,
   MapPin,
   MoreHorizontal,
+  Network,
   Plus,
   Radio,
   Signal,
   Trash2,
+  Waypoints,
 } from 'lucide-react'
 
 import { PageHeader } from '@/components/PageHeader'
@@ -66,7 +70,7 @@ import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn, formatBytes, secondsAgoLabel, timeAgo } from '@/lib/utils'
 import { useT } from '@/i18n'
-import type { Conn, ConnType } from '@/lib/types'
+import type { Conn, ConnDetail, ConnType } from '@/lib/types'
 
 const NONE_VALUE = '__none__'
 
@@ -627,6 +631,10 @@ function ConnectionDetailSheet({
                 />
               </div>
 
+              {detail.integration ? (
+                <IntegrationPanel integration={detail.integration} />
+              ) : null}
+
               {detail.endpoint ? (
                 <div className="space-y-1.5">
                   <p className="text-xs font-medium text-muted-foreground">
@@ -686,5 +694,84 @@ function MetricTile({ label, value }: { label: string; value: string }) {
         {value}
       </p>
     </div>
+  )
+}
+
+// IntegrationPanel answers "why don't I see this connection in the Keenetic UI?"
+// — AWG tunnels become native WireguardN interfaces (visible, routable); Xray
+// connections capture traffic transparently and are intentionally invisible.
+function IntegrationPanel({
+  integration,
+}: {
+  integration: NonNullable<ConnDetail['integration']>
+}) {
+  const t = useT()
+  const visible = integration.visible_in_router
+  const modeLabel =
+    integration.mode === 'native-interface'
+      ? t('connections.integrationModeNative')
+      : integration.mode === 'userspace-awg'
+        ? t('connections.integrationModeUserspace')
+        : t('connections.integrationModeProxy')
+
+  return (
+    <div className="space-y-2.5 rounded-md border border-border/70 bg-muted/30 p-3">
+      <div className="flex items-center gap-2">
+        <Network className="h-4 w-4 text-muted-foreground" />
+        <p className="text-xs font-medium text-foreground">
+          {t('connections.integrationTitle')}
+        </p>
+        <span
+          className={cn(
+            'ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+            visible
+              ? 'bg-success/15 text-success'
+              : 'bg-muted text-muted-foreground',
+          )}
+        >
+          {visible ? (
+            <Eye className="h-3 w-3" />
+          ) : (
+            <EyeOff className="h-3 w-3" />
+          )}
+          {visible
+            ? t('connections.visibleInRouter')
+            : t('connections.invisibleInRouter')}
+        </span>
+      </div>
+
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        {integration.summary}
+      </p>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          <TypeDotLabel>{modeLabel}</TypeDotLabel>
+        </span>
+        {integration.interface ? (
+          <span className="inline-flex items-center gap-1.5">
+            {t('connections.integrationInterface')}:{' '}
+            <code className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-foreground">
+              {integration.interface}
+            </code>
+          </span>
+        ) : null}
+        <span className="inline-flex items-center gap-1.5">
+          <Waypoints className="h-3 w-3" />
+          {integration.routable_target
+            ? t('connections.routableTargetYes')
+            : t('connections.routableTargetNo')}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function TypeDotLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+      {children}
+    </>
   )
 }

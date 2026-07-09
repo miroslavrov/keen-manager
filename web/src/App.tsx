@@ -7,6 +7,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { ConnectionsPage } from '@/pages/ConnectionsPage'
 import { SubscriptionsPage } from '@/pages/SubscriptionsPage'
+import { RoutesPage } from '@/pages/RoutesPage'
 import { BypassPage } from '@/pages/BypassPage'
 import { FailoverPage } from '@/pages/FailoverPage'
 import { LogsPage } from '@/pages/LogsPage'
@@ -58,6 +59,14 @@ export default function App() {
           element={
             <RouteBoundary>
               <SubscriptionsPage />
+            </RouteBoundary>
+          }
+        />
+        <Route
+          path="/routes"
+          element={
+            <RouteBoundary>
+              <RoutesPage />
             </RouteBoundary>
           }
         />

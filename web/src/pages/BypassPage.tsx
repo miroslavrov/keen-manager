@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Download,
   FileText,
+  Link2,
   Loader2,
   Play,
   RefreshCw,
@@ -11,6 +12,7 @@ import {
   Save,
   Search,
   ShieldOff,
+  SlidersHorizontal,
   Square,
   XCircle,
 } from 'lucide-react'
@@ -27,6 +29,15 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Switch } from '@/components/ui/switch'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -38,7 +49,21 @@ import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useT } from '@/i18n'
-import type { DomainCheck, NfqwsMode } from '@/lib/types'
+import type { DomainCheck, NfqwsConf, NfqwsMode } from '@/lib/types'
+
+// nfqws2 mode macro <-> Select value. The structured conf stores the active
+// mode as a macro in NFQWS_EXTRA_ARGS (e.g. "$MODE_AUTO").
+const MODE_MACROS: Record<NfqwsMode, string> = {
+  MODE_AUTO: '$MODE_AUTO',
+  MODE_LIST: '$MODE_LIST',
+  MODE_ALL: '$MODE_ALL',
+}
+function macroToMode(macro: string): NfqwsMode {
+  const m = (macro || '').toUpperCase()
+  if (m.includes('MODE_LIST')) return 'MODE_LIST'
+  if (m.includes('MODE_ALL')) return 'MODE_ALL'
+  return 'MODE_AUTO'
+}
 
 type NfqwsServiceAction = 'start' | 'stop' | 'restart' | 'reload' | 'install'
 
@@ -68,7 +93,7 @@ export function BypassPage() {
         </TabsList>
 
         <TabsContent value="config">
-          <ConfigEditor />
+          <ConfigSection />
         </TabsContent>
         <TabsContent value="hostlists">
           <HostlistsManager />
@@ -242,6 +267,313 @@ function ServiceControlCard({
   )
 }
 
+// ConfigSection wraps the typed form and the raw editor in sub-tabs: the
+// structured Form is primary; the raw nfqws2.conf editor is kept under
+// "Advanced" for power users (parity with nfqws-keenetic-web).
+function ConfigSection() {
+  const t = useT()
+  return (
+    <Tabs defaultValue="form" className="space-y-4">
+      <TabsList>
+        <TabsTrigger value="form" className="gap-1.5">
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          {t('bypass.subForm')}
+        </TabsTrigger>
+        <TabsTrigger value="raw" className="gap-1.5">
+          <FileText className="h-3.5 w-3.5" />
+          {t('bypass.subAdvanced')}
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="form">
+        <StructuredConfigEditor />
+      </TabsContent>
+      <TabsContent value="raw">
+        <ConfigEditor />
+      </TabsContent>
+    </Tabs>
+  )
+}
+
+function StructuredConfigEditor() {
+  const t = useT()
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+
+  const { data: conf, isLoading } = useQuery({
+    queryKey: ['nfqws-config-structured'],
+    queryFn: api.nfqwsConfigStructured,
+  })
+
+  const [form, setForm] = React.useState<NfqwsConf | null>(null)
+  const [dirty, setDirty] = React.useState(false)
+
+  React.useEffect(() => {
+    if (conf) {
+      setForm(conf)
+      setDirty(false)
+    }
+  }, [conf])
+
+  const set = <K extends keyof NfqwsConf>(key: K, value: NfqwsConf[K]) => {
+    setForm((prev) => (prev ? { ...prev, [key]: value } : prev))
+    setDirty(true)
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: () => api.saveNfqwsConfigStructured(form ?? {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['nfqws-config-structured'] })
+      queryClient.invalidateQueries({ queryKey: ['nfqws-config'] })
+      queryClient.invalidateQueries({ queryKey: ['nfqws'] })
+      setDirty(false)
+      toast({
+        variant: 'success',
+        title: t('bypass.configSaved'),
+        description: t('bypass.configSavedDesc'),
+      })
+    },
+    onError: () => toast({ variant: 'error', title: t('bypass.configSaveError') }),
+  })
+
+  if (isLoading || !form) {
+    return <Skeleton className="h-96" />
+  }
+
+  const modeLabels: Record<NfqwsMode, string> = {
+    MODE_AUTO: t('bypass.modeAuto'),
+    MODE_LIST: t('bypass.modeList'),
+    MODE_ALL: t('bypass.modeAll'),
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <div className="space-y-1">
+          <CardTitle>{t('bypass.configTitle')}</CardTitle>
+          <p className="text-xs text-muted-foreground">{t('bypass.formHint')}</p>
+        </div>
+        <Button
+          size="sm"
+          onClick={() => saveMutation.mutate()}
+          disabled={!dirty || saveMutation.isPending}
+          className="gap-1.5"
+        >
+          {saveMutation.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Save className="h-3.5 w-3.5" />
+          )}
+          {t('common.save')}
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Mode & ports */}
+        <section className="space-y-4">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('bypass.sectionMode')}
+          </h4>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-2 sm:col-span-3 sm:max-w-md">
+              <Label>{t('bypass.modeLabel')}</Label>
+              <Select
+                value={macroToMode(form.nfqws_extra_args)}
+                onValueChange={(v) =>
+                  set('nfqws_extra_args', MODE_MACROS[v as NfqwsMode])
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(modeLabels) as NfqwsMode[]).map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {modeLabels[m]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <FieldInput
+              label={t('bypass.fieldTcpPorts')}
+              value={form.tcp_ports}
+              onChange={(v) => set('tcp_ports', v)}
+              placeholder="80,443"
+              mono
+            />
+            <FieldInput
+              label={t('bypass.fieldUdpPorts')}
+              value={form.udp_ports}
+              onChange={(v) => set('udp_ports', v)}
+              placeholder="443,50000-50100"
+              mono
+            />
+            <FieldInput
+              label={t('bypass.fieldIspInterface')}
+              value={form.isp_interface}
+              onChange={(v) => set('isp_interface', v)}
+              placeholder={t('bypass.fieldIspInterfacePlaceholder')}
+              mono
+            />
+          </div>
+        </section>
+
+        <Separator />
+
+        {/* Strategy args */}
+        <section className="space-y-4">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('bypass.sectionStrategy')}
+          </h4>
+          <FieldArgs
+            label={t('bypass.fieldArgsTcp')}
+            value={form.nfqws_args}
+            onChange={(v) => set('nfqws_args', v)}
+            placeholder={t('bypass.argsPlaceholder')}
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FieldArgs
+              label={t('bypass.fieldArgsQuic')}
+              value={form.nfqws_args_quic}
+              onChange={(v) => set('nfqws_args_quic', v)}
+            />
+            <FieldArgs
+              label={t('bypass.fieldArgsUdp')}
+              value={form.nfqws_args_udp}
+              onChange={(v) => set('nfqws_args_udp', v)}
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FieldArgs
+              label={t('bypass.fieldBaseArgs')}
+              value={form.nfqws_base_args}
+              onChange={(v) => set('nfqws_base_args', v)}
+            />
+            <FieldArgs
+              label={t('bypass.fieldCustomArgs')}
+              value={form.nfqws_args_custom}
+              onChange={(v) => set('nfqws_args_custom', v)}
+            />
+          </div>
+        </section>
+
+        <Separator />
+
+        {/* Advanced */}
+        <section className="space-y-4">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('bypass.sectionAdvanced')}
+          </h4>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <FieldInput
+              label={t('bypass.fieldPolicyName')}
+              value={form.policy_name}
+              onChange={(v) => set('policy_name', v)}
+              mono
+            />
+            <FieldNumber
+              label={t('bypass.fieldNfqueue')}
+              value={form.nfqueue_num}
+              onChange={(v) => set('nfqueue_num', v)}
+            />
+            <FieldNumber
+              label={t('bypass.fieldLogLevel')}
+              value={form.log_level}
+              onChange={(v) => set('log_level', v)}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 rounded-md border border-border/70 px-3 py-2.5">
+            <div className="space-y-0.5">
+              <Label>{t('bypass.fieldIpv6')}</Label>
+              <p className="text-xs text-muted-foreground">
+                {t('bypass.fieldIpv6Desc')}
+              </p>
+            </div>
+            <Switch
+              checked={form.ipv6_enabled}
+              onCheckedChange={(v) => set('ipv6_enabled', v)}
+              aria-label={t('bypass.fieldIpv6')}
+            />
+          </div>
+        </section>
+      </CardContent>
+    </Card>
+  )
+}
+
+function FieldInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  mono,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  mono?: boolean
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        className={mono ? 'font-mono text-xs' : undefined}
+      />
+    </div>
+  )
+}
+
+function FieldNumber({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="tabular-nums"
+      />
+    </div>
+  )
+}
+
+function FieldArgs({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        className="min-h-[72px] font-mono text-xs leading-relaxed"
+      />
+    </div>
+  )
+}
+
 function ConfigEditor() {
   const t = useT()
   const queryClient = useQueryClient()
@@ -381,6 +713,7 @@ function HostlistsManager() {
 
   const [content, setContent] = React.useState('')
   const [dirty, setDirty] = React.useState(false)
+  const [importOpen, setImportOpen] = React.useState(false)
 
   React.useEffect(() => {
     if (listData) {
@@ -388,6 +721,22 @@ function HostlistsManager() {
       setDirty(false)
     }
   }, [listData])
+
+  const mergeImported = (domains: string[], mode: 'append' | 'replace') => {
+    setContent((prev) => {
+      if (mode === 'replace') return domains.join('\n')
+      const existing = new Set(
+        prev
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean),
+      )
+      const merged = prev.replace(/\s+$/, '').split('\n')
+      for (const d of domains) if (!existing.has(d)) merged.push(d)
+      return merged.join('\n')
+    })
+    setDirty(true)
+  }
 
   const saveMutation = useMutation({
     mutationFn: () => api.saveNfqwsList(selected as string, content),
@@ -456,19 +805,30 @@ function HostlistsManager() {
               {t('bypass.activeEntries', { count: entryCount })}
             </p>
           </div>
-          <Button
-            size="sm"
-            onClick={() => saveMutation.mutate()}
-            disabled={!dirty || saveMutation.isPending}
-            className="gap-1.5"
-          >
-            {saveMutation.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Save className="h-3.5 w-3.5" />
-            )}
-            {t('common.save')}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setImportOpen(true)}
+              className="gap-1.5"
+            >
+              <Link2 className="h-3.5 w-3.5" />
+              {t('bypass.importList')}
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => saveMutation.mutate()}
+              disabled={!dirty || saveMutation.isPending}
+              className="gap-1.5"
+            >
+              {saveMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              {t('common.save')}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {listLoading ? (
@@ -487,7 +847,139 @@ function HostlistsManager() {
           )}
         </CardContent>
       </Card>
+
+      <ImportListDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        listName={selected ?? ''}
+        onImported={mergeImported}
+      />
     </div>
+  )
+}
+
+// ImportListDialog fetches a remote domain-list URL (v2fly / plain / hosts),
+// flattening include: directives and @attribute tags server-side, then hands
+// the domains back to be merged into the open hostlist for review before save.
+function ImportListDialog({
+  open,
+  onOpenChange,
+  listName,
+  onImported,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  listName: string
+  onImported: (domains: string[], mode: 'append' | 'replace') => void
+}) {
+  const t = useT()
+  const { toast } = useToast()
+  const [url, setUrl] = React.useState('')
+  const [attr, setAttr] = React.useState('')
+  const [mode, setMode] = React.useState<'append' | 'replace'>('append')
+
+  const importMutation = useMutation({
+    mutationFn: () => api.resolveList(url.trim(), attr.trim() || undefined),
+    onSuccess: (res) => {
+      if (!res.domains || res.domains.length === 0) {
+        toast({ variant: 'error', title: t('bypass.importNoDomains') })
+        return
+      }
+      onImported(res.domains, mode)
+      const extra: string[] = []
+      if (res.skipped_n > 0)
+        extra.push(t('bypass.importDoneSkipped', { count: res.skipped_n }))
+      if (res.truncated) extra.push(t('bypass.importDoneTrunc'))
+      toast({
+        variant: 'success',
+        title: t('bypass.importDone', {
+          count: res.domains.length,
+          sources: res.sources?.length ?? 1,
+        }),
+        description: extra.join(' ') || undefined,
+      })
+      setUrl('')
+      setAttr('')
+      onOpenChange(false)
+    },
+    onError: () => toast({ variant: 'error', title: t('bypass.importFailed') }),
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t('bypass.importListTitle', { name: listName })}</DialogTitle>
+          <DialogDescription>{t('bypass.importListDesc')}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="import-list-url">{t('bypass.importUrlLabel')}</Label>
+            <Input
+              id="import-list-url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder={t('bypass.importUrlPlaceholder')}
+              className="font-mono text-xs"
+              spellCheck={false}
+              autoFocus
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="import-list-attr">{t('bypass.importAttrLabel')}</Label>
+              <Input
+                id="import-list-attr"
+                value={attr}
+                onChange={(e) => setAttr(e.target.value)}
+                placeholder={t('bypass.importAttrPlaceholder')}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{t('bypass.modeLabel')}</Label>
+              <Select
+                value={mode}
+                onValueChange={(v) => setMode(v as 'append' | 'replace')}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="append">
+                    {t('bypass.importModeAppend')}
+                  </SelectItem>
+                  <SelectItem value="replace">
+                    {t('bypass.importModeReplace')}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t('bypass.importChunkNote')}
+          </p>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            onClick={() => importMutation.mutate()}
+            disabled={!url.trim() || importMutation.isPending}
+            className="gap-1.5"
+          >
+            {importMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            {importMutation.isPending ? t('bypass.importRunning') : t('bypass.importRun')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
