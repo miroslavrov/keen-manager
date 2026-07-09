@@ -264,6 +264,12 @@ func (e *Engine) reconcileBypass() {
 // bypassClientDown latch so the user can retry after installing a missing
 // component.
 func (e *Engine) SaveBypass(fields map[string]any) error {
+	// Pre-flight: turning the feature ON needs tpws present on-device. Reject
+	// cleanly (without persisting enabled=true) so the toggle can't latch on
+	// against a missing binary — the user installs tpws first, then enables.
+	if v, ok := fields["enabled"].(bool); ok && v && !e.runner.DryRun && !e.tpws.Installed() {
+		return fmt.Errorf("tpws is not installed — install it first (opkg install tpws), then enable the routable DPI-bypass interface")
+	}
 	var enabledChanged bool
 	err := e.store.Mutate(func(s *model.State) error {
 		if v, ok := fields["enabled"].(bool); ok {

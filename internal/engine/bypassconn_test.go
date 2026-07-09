@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/miroslavrov/keen-manager/internal/model"
+	"github.com/miroslavrov/keen-manager/internal/platform"
 	"github.com/miroslavrov/keen-manager/internal/tpws"
 )
 
@@ -120,6 +121,25 @@ func TestSaveBypassDisableTeardown(t *testing.T) {
 	}
 	if e.managedBypassIface() != "" {
 		t.Error("managed bypass interface should be cleared on disable")
+	}
+}
+
+// TestSaveBypassEnableRequiresTpws confirms enabling on a device without tpws is
+// rejected cleanly and does not latch the feature on.
+func TestSaveBypassEnableRequiresTpws(t *testing.T) {
+	e := newTestEngine(t)
+	if platform.Which("tpws") {
+		t.Skip("tpws present on PATH in this environment; pre-flight test not meaningful")
+	}
+	// Simulate on-device (non-dry-run) with no tpws binary present.
+	e.runner.DryRun = false
+	defer func() { e.runner.DryRun = true }()
+
+	if err := e.SaveBypass(map[string]any{"enabled": true}); err == nil {
+		t.Error("expected an error enabling bypass without tpws installed")
+	}
+	if e.bypassEnabled() {
+		t.Error("bypass must not be enabled when tpws is missing")
 	}
 }
 
