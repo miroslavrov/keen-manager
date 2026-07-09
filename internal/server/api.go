@@ -48,6 +48,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/routes/{id}/toggle", s.requireAuth(s.handleToggleRoute))
 	mux.HandleFunc("DELETE /api/routes/{id}", s.requireAuth(s.handleDeleteRoute))
 
+	// Remote list resolution (v2fly domain-list / plain / hosts).
+	mux.HandleFunc("POST /api/lists/resolve", s.requireAuth(s.handleResolveList))
+
 	// nfqws2.
 	mux.HandleFunc("GET /api/nfqws", s.requireAuth(s.handleNfqws))
 	mux.HandleFunc("POST /api/nfqws/action", s.requireAuth(s.handleNfqwsAction))
@@ -278,6 +281,31 @@ func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w)
+}
+
+// ----- remote list resolution -----
+
+func (s *Server) handleResolveList(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		URL  string `json:"url"`
+		Attr string `json:"attr"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(body.URL) == "" {
+		writeErr(w, http.StatusBadRequest, "list url is required")
+		return
+	}
+	res, err := s.eng.ResolveList(body.URL, body.Attr)
+	if err != nil {
+		// Upstream fetch/parse failure — 502 so the UI shows a fetch error, not
+		// a client mistake.
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // ----- nfqws2 -----
