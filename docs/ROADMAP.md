@@ -51,6 +51,34 @@ AWG2).
 
 ---
 
+## Done — landed this iteration (web P1 + fixes)
+
+- [x] **Routes / «Маршруты» web UI (`/routes`).** New nav entry + page: the
+  81-service preset catalog grouped by category with search + multi-select, a
+  target-connection picker (native AWG interfaces only), an active-routes list
+  with per-route enable/apply/delete, a custom domains/subnets route builder, and
+  a **remote list importer** (see below). Bilingual (`i18n/pages/routes.ts`).
+- [x] **Integration panel on the connection detail sheet.** Renders
+  `GET /api/connections/{id}` → `integration`: a "visible in router / not an
+  interface" badge, the native `WireguardN` name, mode (native/userspace/proxy)
+  and whether it can back a route — the direct answer to "I added a sub and see
+  nothing in the router UI".
+- [x] **Structured nfqws2 form** on the Bypass page. `GET/PUT
+  /api/nfqws/config/structured` typed fields (mode AUTO/LIST/ALL, TCP/UDP ports,
+  strategy arg blocks, policy, NFQUEUE, log level, IPv6) with the raw editor kept
+  under an **Advanced** sub-tab. Lossless round-trip preserved by the backend.
+- [x] **Per-connection fallback picker** — confirmed already shipped on the
+  Connections row dropdown (`fallback_to` via `PUT /api/connections/{id}`).
+- [x] **Remote domain-list import (v2fly / plain / hosts).** New `internal/listsrc`
+  resolver + `POST /api/lists/resolve`: normalises GitHub blob→raw URLs, follows
+  `include:` recursively with a cycle guard, honours `@attribute` filters, and
+  flattens to a deduped domain set. Surfaced in the Bypass → Hostlists "Import
+  from URL" dialog (append/replace) and in Routes → Custom & import.
+- [x] **Login hard-gate fix.** `RequireAuth` no longer renders the protected
+  tree while unauthenticated (was a soft gate + 30s stale cache → "sometimes lets
+  me in without a password"); auth state is now revalidated fresh, and auth
+  endpoints send `no-store`.
+
 ## P1 — next / ближайшее
 
 - [~] **Native AWG2 traffic routing — validate on-device.** Interface creation +
@@ -59,18 +87,18 @@ AWG2).
   device (RCI field shape can vary by firmware). If traffic doesn't route,
   assign the created `WireguardN` connection a priority in the Keenetic UI — the
   tunnel itself comes up correctly.
-- [ ] **nfqws2 structured form in the web UI + API.** The parser exists
-  (`internal/nfqws/schema.go`, `Controller.Conf/SaveConf`); expose it via
-  `GET/PUT /api/nfqws/config/structured` and a typed form (keep the raw editor
-  as an "advanced" tab).
-- [ ] **Per-connection fallback chain in the UI.** The model has
-  `Connection.FallbackTo`; surface a per-connection fallback picker (VPN → other
-  VPN → nfqws strategy → AWG → direct) alongside the global failover chain.
+- [ ] **Validate the Routes / DNS path on-device.** `object-group fqdn` +
+  `dns-proxy route` shapes are ported from awg-manager but unverified on live
+  5.1.0. Confirm the ≤300/group chunking vs. the observed ~100-line per-list
+  limit and lower `keenetic.ChunkDomains` if the firmware rejects large groups.
 - [ ] **nfqws health → failover signal.** Detect a dead nfqws2 strategy (daemon
   down, or a background probe of known-should-bypass domains) and let it drive a
   fallback, so "strategy died → fall back to AWG" is automatic.
 - [ ] **Kernel-module readiness for nfqws2.** Use `platform.KernelModuleDirs()`
   to verify `nfnetlink_queue` / `xt_NFQUEUE` before reporting nfqws2 healthy.
+- [ ] **Auto-split imported lists into ≤100-line hostlists.** `listsrc` returns a
+  flat set; the import dialog merges into one list. For huge lists, split across
+  `user.list`, `user2.list`, … to respect Keenetic's per-list cap.
 
 ## P2 — robustness & parity / надёжность и паритет
 
