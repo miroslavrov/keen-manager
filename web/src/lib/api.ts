@@ -36,6 +36,7 @@ import type {
   Server,
   Settings,
   Sub,
+  Traffic,
 } from './types'
 
 const BASE = '/api'
@@ -158,6 +159,9 @@ export const api = {
 
   // ---- aggregate state ----
   state: () => withMock<AppState>(() => request('/state'), () => mocks.mockState),
+
+  traffic: () =>
+    withMock<Traffic>(() => request('/traffic'), () => mocks.mockTraffic),
 
   // ---- connections ----
   connections: () =>

@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
   ArrowRight,
+  Check,
+  Download,
   Gauge,
   GitBranch,
   Globe,
@@ -13,6 +15,8 @@ import {
   RefreshCw,
   Shield,
   ShieldAlert,
+  Upload,
+  X,
   Zap,
 } from 'lucide-react'
 
@@ -32,9 +36,56 @@ import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn, formatUptime, timeAgo } from '@/lib/utils'
 import { useT } from '@/i18n'
-import type { AppState, Conn } from '@/lib/types'
+import type { AppState, Conn, Health, Traffic } from '@/lib/types'
 
 const STATE_POLL_MS = 5000
+const TRAFFIC_POLL_MS = 2000
+
+// useWanThroughput diffs successive /api/traffic snapshots for the WAN interface
+// into a live download/upload byte-rate. It times deltas with the client clock
+// (Date.now) so second-precision server timestamps don't distort the rate, and
+// resets cleanly when the interface disappears from the snapshot.
+function useWanThroughput(
+  traffic: Traffic | undefined,
+  wanIface: string,
+): { down: number; up: number } | null {
+  const [rate, setRate] = React.useState<{ down: number; up: number } | null>(
+    null,
+  )
+  const prev = React.useRef<{ t: number; rx: number; tx: number } | null>(null)
+  React.useEffect(() => {
+    if (!traffic || !wanIface) return
+    const row = traffic.interfaces.find((i) => i.name === wanIface)
+    if (!row) {
+      prev.current = null
+      setRate(null)
+      return
+    }
+    const now = Date.now()
+    const last = prev.current
+    prev.current = { t: now, rx: row.rx_bytes, tx: row.tx_bytes }
+    if (!last) return
+    const dt = (now - last.t) / 1000
+    if (dt <= 0) return
+    setRate({
+      down: Math.max(0, (row.rx_bytes - last.rx) / dt),
+      up: Math.max(0, (row.tx_bytes - last.tx) / dt),
+    })
+  }, [traffic, wanIface])
+  return rate
+}
+
+// formatRate renders a bytes/second value with a sensible unit.
+function formatRate(bytesPerSec: number): string {
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+  let v = bytesPerSec
+  let u = 0
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024
+    u++
+  }
+  return `${u === 0 || v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[u]}`
+}
 
 export function DashboardPage() {
   const t = useT()
@@ -49,8 +100,26 @@ export function DashboardPage() {
     refetchInterval: STATE_POLL_MS,
   })
 
+  // Firmware capabilities change only across reboots/upgrades, so poll slowly.
+  const { data: health } = useQuery({
+    queryKey: ['health'],
+    queryFn: api.health,
+    refetchInterval: 60_000,
+    staleTime: 60_000,
+  })
+
+  // Live per-interface counters, diffed between polls to show WAN throughput.
+  const { data: traffic } = useQuery({
+    queryKey: ['traffic'],
+    queryFn: api.traffic,
+    refetchInterval: TRAFFIC_POLL_MS,
+  })
+
   const connections = state?.connections ?? []
   const active = connections.find((c) => c.id === state?.active_connection_id)
+
+  const wanIface = state?.wan?.interface ?? ''
+  const wanRate = useWanThroughput(traffic, wanIface)
 
   const killMutation = useMutation({
     mutationFn: (next: boolean) =>
@@ -153,7 +222,7 @@ export function DashboardPage() {
         <>
           {/* WAN + active hero */}
           <div className="grid gap-4 lg:grid-cols-3">
-            <WanCard state={state} />
+            <WanCard state={state} rate={wanRate} />
             <ActiveHeroCard
               active={active}
               killSwitch={state?.kill_switch ?? false}
@@ -161,6 +230,12 @@ export function DashboardPage() {
               killPending={killMutation.isPending}
             />
           </div>
+
+          {/* Router capabilities */}
+          <CapabilitiesBar
+            health={health}
+            hookInstalled={state?.hook_installed ?? false}
+          />
 
           {/* Summary stats */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -272,7 +347,13 @@ export function DashboardPage() {
   )
 }
 
-function WanCard({ state }: { state?: AppState }) {
+function WanCard({
+  state,
+  rate,
+}: {
+  state?: AppState
+  rate: { down: number; up: number } | null
+}) {
   const t = useT()
   const wan = state?.wan
   return (
@@ -296,6 +377,19 @@ function WanCard({ state }: { state?: AppState }) {
           </span>
         </InfoRow>
         <Separator />
+        <div className="flex items-center justify-between gap-3">
+          <ThroughputPill
+            icon={Download}
+            label={t('dashboard.download')}
+            value={rate ? formatRate(rate.down) : '—'}
+          />
+          <ThroughputPill
+            icon={Upload}
+            label={t('dashboard.upload')}
+            value={rate ? formatRate(rate.up) : '—'}
+          />
+        </div>
+        <Separator />
         <InfoRow label={t('dashboard.uptime')}>
           <span className="font-mono text-sm tabular-nums text-foreground">
             {formatUptime(wan?.uptime_seconds)}
@@ -303,6 +397,80 @@ function WanCard({ state }: { state?: AppState }) {
         </InfoRow>
       </CardContent>
     </Card>
+  )
+}
+
+function ThroughputPill({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Download
+  label: string
+  value: string
+}) {
+  return (
+    <div className="flex flex-1 items-center gap-2 rounded-md border border-border/70 bg-muted/40 px-2.5 py-1.5">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 leading-tight">
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          {label}
+        </p>
+        <p className="truncate font-mono text-sm tabular-nums text-foreground">
+          {value}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// CapabilitiesBar badges what the detected firmware supports (from GET
+// /api/health) plus whether the ndm routing hook is installed (from state), so
+// the user can see at a glance why a native path is or isn't available.
+function CapabilitiesBar({
+  health,
+  hookInstalled,
+}: {
+  health?: Health
+  hookInstalled: boolean
+}) {
+  const t = useT()
+  const caps = health?.capabilities
+  const items = [
+    { label: t('dashboard.capNativeAwg2'), ok: !!caps?.native_awg2 },
+    { label: t('dashboard.capWireguard'), ok: !!caps?.wireguard },
+    { label: t('dashboard.capProxyClient'), ok: !!caps?.proxy_client },
+    { label: t('dashboard.capDnsRoute'), ok: !!caps?.dns_route },
+    { label: t('dashboard.capHook'), ok: hookInstalled },
+  ]
+  return (
+    <Card>
+      <CardContent className="flex flex-wrap items-center gap-2 p-4">
+        <span className="mr-1 text-xs font-medium text-muted-foreground">
+          {t('dashboard.capabilities')}
+          {caps?.firmware ? ` · ${caps.firmware}` : ''}
+        </span>
+        {items.map((it) => (
+          <CapBadge key={it.label} label={it.label} ok={it.ok} />
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
+function CapBadge({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium',
+        ok
+          ? 'border-success/30 bg-success/10 text-success'
+          : 'border-border bg-muted text-muted-foreground',
+      )}
+    >
+      {ok ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+      {label}
+    </span>
   )
 }
 

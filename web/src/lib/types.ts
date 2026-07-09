@@ -303,6 +303,21 @@ export interface AppState {
   failover: Failover
   wan: Wan
   kill_switch: boolean
+  /** Whether the ndm netfilter.d hook that reapplies routing rules is present. */
+  hook_installed?: boolean
+}
+
+export interface IfaceTraffic {
+  name: string
+  rx_bytes: number
+  tx_bytes: number
+}
+
+/** Snapshot of per-interface cumulative byte counters (GET /api/traffic). The
+ * UI diffs successive snapshots to derive live throughput. */
+export interface Traffic {
+  at: string
+  interfaces: IfaceTraffic[]
 }
 
 export interface Platform {
@@ -326,12 +341,21 @@ export interface Settings {
   platform: Platform
 }
 
+export interface Capabilities {
+  firmware?: string
+  native_awg2: boolean
+  wireguard: boolean
+  proxy_client: boolean
+  dns_route: boolean
+}
+
 export interface Health {
   status: string
   version: string
   arch: string
   os: string
   uptime_seconds: number
+  capabilities: Capabilities
 }
 
 export interface AuthState {

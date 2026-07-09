@@ -22,6 +22,7 @@ import type {
   Server,
   Settings,
   Sub,
+  Traffic,
 } from './types'
 
 const now = Date.now()
@@ -188,11 +189,12 @@ export const mockState: AppState = {
   nfqws: mockNfqws,
   failover: mockFailover,
   wan: {
-    interface: 'eth3 (PPPoE)',
+    interface: 'eth3',
     ip: '188.170.82.41',
     uptime_seconds: 412_338,
   },
   kill_switch: false,
+  hook_installed: true,
 }
 
 export const mockConnDetails: Record<string, ConnDetail> = {
@@ -529,6 +531,22 @@ export const mockHealth: Health = {
   arch: 'mipsel',
   os: 'KeeneticOS 4.2.3 (NDMS)',
   uptime_seconds: 412_902,
+  capabilities: {
+    firmware: '5.01.C.0.0-1',
+    native_awg2: true,
+    wireguard: true,
+    proxy_client: true,
+    dns_route: true,
+  },
+}
+
+export const mockTraffic: Traffic = {
+  at: new Date().toISOString(),
+  interfaces: [
+    { name: 'eth3', rx_bytes: 9_500_000_000, tx_bytes: 1_200_000_000 },
+    { name: 'nwg0', rx_bytes: 3_100_000_000, tx_bytes: 410_000_000 },
+    { name: 'lo', rx_bytes: 12_000_000, tx_bytes: 12_000_000 },
+  ],
 }
 
 export const mockAuth: AuthState = {
