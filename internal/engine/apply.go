@@ -63,6 +63,13 @@ func (e *Engine) Activate(id string) error {
 		}
 	}
 
+	// One exit point: now that the new connection has verified, tear down the
+	// native interface of the connection we switched away from, so keen-manager
+	// never leaves a growing pile of WireguardN interfaces on the router as the
+	// user tries locations. Done only after verify so a failed switch never
+	// removes the working tunnel (rollback restores prev instead).
+	e.supersedePrevNativeIface(prev, id)
+
 	e.foResetFail()
 	e.setRuntime(id, model.RuntimeStatus{
 		ConnID: id, Status: model.StatusUp, Active: true, LastCheck: time.Now(),
@@ -70,12 +77,56 @@ func (e *Engine) Activate(id string) error {
 	e.Logf("active connection is now %s", c.Name)
 	e.publishState()
 	go e.probeOne(id)
-	// Newly-activated AWG connections may now have a native interface that
-	// enabled-but-pending service routes were waiting for; re-apply them.
-	if c.Type == model.ConnAWG {
+	// Re-apply enabled-but-pending service routes that were waiting on this
+	// connection. AWG routes needed the native interface that now exists; Xray
+	// routes were compiled into the config bringUp just applied, so they are
+	// already live and only need marking.
+	switch c.Type {
+	case model.ConnAWG:
 		go e.reconcileRoutes()
+	case model.ConnXray:
+		e.markActiveXrayRoutesApplied(c.ID)
 	}
 	return nil
+}
+
+// supersedePrevNativeIface enforces the single-exit-point model after a
+// successful activation: it removes the previously-active connection's native
+// AWG interface (and any service routes pinned to it) so only the active
+// tunnel's interface remains on the router. No-op off-device, when there is no
+// previous, or when the previous connection had no native interface.
+func (e *Engine) supersedePrevNativeIface(prev, active string) {
+	if e.runner.DryRun || prev == "" || prev == active {
+		return
+	}
+	ifaceName, ok := e.nativeIface(prev)
+	if !ok {
+		return
+	}
+	// Drop any dns-proxy routes bound to the interface we're about to delete so
+	// no dangling route is left behind; they revert to pending and re-apply if
+	// their connection is activated again.
+	for _, r := range e.store.Get().Routes {
+		if name, ok := e.resolveRouteIface(r); ok && name == ifaceName {
+			_ = e.unapplyRoute(r)
+		}
+	}
+	if err := e.awgNativeDown(prev); err != nil {
+		e.Logf("could not remove superseded interface %s: %v", ifaceName, err)
+		return
+	}
+	e.Logf("removed superseded native interface %s (previous active tunnel)", ifaceName)
+}
+
+// markActiveXrayRoutesApplied flags every enabled route targeting the active
+// Xray connection as applied — bringUp already compiled them into the running
+// config, so they are live the moment the connection is up.
+func (e *Engine) markActiveXrayRoutesApplied(connID string) {
+	for _, r := range e.store.Get().Routes {
+		if r.Enabled && r.TargetConnID == connID {
+			e.markRouteApplied(r.ID, nil, true)
+		}
+	}
 }
 
 // bringUp starts a connection's underlying service without changing routing.
@@ -104,7 +155,7 @@ func (e *Engine) bringUp(c model.Connection) error {
 		if err != nil {
 			return fmt.Errorf("xray-core not available: %w", err)
 		}
-		cfg, err := e.buildActiveXray(srv)
+		cfg, err := e.buildActiveXray(c.ID, srv, "")
 		if err != nil {
 			return err
 		}
@@ -235,7 +286,13 @@ func (e *Engine) setActive(id string) error {
 // a local SOCKS inbound (LAN proxy + probe target) plus a TPROXY inbound for
 // transparent capture. Outbounds carry SO_MARK 255 so Xray's own egress is not
 // re-captured (route.Manager excludes that mark).
-func (e *Engine) buildActiveXray(server model.Server) (*xray.Config, error) {
+//
+// When one or more enabled service routes target this connection, their domains
+// and subnets are compiled into per-service (split-tunnel) routing so only those
+// services egress through the server and the rest goes direct. excludeRouteID
+// lets a teardown rebuild the config without a route that is still present in
+// state (DeleteRoute/SetRouteEnabled tear down before/while mutating state).
+func (e *Engine) buildActiveXray(connID string, server model.Server, excludeRouteID string) (*xray.Config, error) {
 	opts := xray.Defaults()
 	opts.SocksPort = xraySocksPort
 	opts.EnableTProxy = true
@@ -245,7 +302,25 @@ func (e *Engine) buildActiveXray(server model.Server) (*xray.Config, error) {
 		opts.ProbeURL = pt
 		opts.PingDestination = pt
 	}
+	opts.SplitDomains, opts.SplitSubnets = e.xrayRouteMembership(connID, excludeRouteID)
 	return xray.BuildConfig([]model.Server{server}, opts)
+}
+
+// xrayRouteMembership aggregates the domains/subnets of every enabled service
+// route that targets the given Xray connection (skipping excludeID). An empty
+// result means "no split routes" → buildActiveXray produces a full tunnel.
+func (e *Engine) xrayRouteMembership(connID, excludeID string) (domains, subnets []string) {
+	if connID == "" {
+		return nil, nil
+	}
+	for _, r := range e.store.Get().Routes {
+		if !r.Enabled || r.ID == excludeID || r.TargetConnID != connID {
+			continue
+		}
+		domains = append(domains, r.Domains...)
+		subnets = append(subnets, r.Subnets...)
+	}
+	return dedupeLower(domains), dedupe(subnets)
 }
 
 // probeTarget is the connectivity check URL (failover probe target, or default).

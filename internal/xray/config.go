@@ -3,6 +3,7 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/miroslavrov/keen-manager/internal/model"
 )
@@ -105,6 +106,16 @@ type Options struct {
 	APIPort         int
 	TagPrefix       string
 	LogLevel        string
+
+	// SplitDomains / SplitSubnets, when either is non-empty, switch the config
+	// to per-service ("split tunnel") routing: only traffic whose destination
+	// matches one of these domains (or subnets) is sent through the server
+	// outbound; everything else is routed direct (freedom). This is how the
+	// Routes feature sends selected services through an Xray connection while the
+	// rest of the LAN egresses normally. When both are empty the config is a full
+	// tunnel — all captured traffic goes through the server.
+	SplitDomains []string
+	SplitSubnets []string
 }
 
 // Defaults returns sane default options.
@@ -196,6 +207,14 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 	// API traffic to api outbound.
 	cfg.Routing.Rules = append(cfg.Routing.Rules, Rule{Type: "field", InboundTag: []string{"api"}, OutboundTag: "api"})
 
+	// Per-service split routing: when a domain/subnet set is supplied, only that
+	// traffic goes through the tunnel (balancer or pinned server) and everything
+	// else falls through to a direct catch-all. Order matters — Xray evaluates
+	// rules top-down, so the matched rule precedes the direct catch-all.
+	splitDomains := xrayDomainRules(opts.SplitDomains)
+	splitSubnets := trimAll(opts.SplitSubnets)
+	split := len(splitDomains) > 0 || len(splitSubnets) > 0
+
 	if opts.EnableBalancer && len(tags) > 1 {
 		cfg.Routing.Balancers = []Balancer{{
 			Tag:         "auto",
@@ -203,9 +222,15 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 			Strategy:    Strategy{Type: "leastPing"},
 			FallbackTag: tags[0],
 		}}
-		cfg.Routing.Rules = append(cfg.Routing.Rules, Rule{
-			Type: "field", InboundTag: inboundTags, BalancerTag: "auto",
-		})
+		tunnel := Rule{Type: "field", InboundTag: inboundTags, BalancerTag: "auto"}
+		if split {
+			tunnel.Domain = splitDomains
+			tunnel.IP = splitSubnets
+			cfg.Routing.Rules = append(cfg.Routing.Rules, tunnel)
+			cfg.Routing.Rules = append(cfg.Routing.Rules, Rule{Type: "field", InboundTag: inboundTags, OutboundTag: "direct"})
+		} else {
+			cfg.Routing.Rules = append(cfg.Routing.Rules, tunnel)
+		}
 		cfg.BurstObservatory = &BurstObservatory{
 			SubjectSelector: []string{opts.TagPrefix},
 			PingConfig: PingConfig{
@@ -217,12 +242,63 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 		}
 	} else {
 		// Pin to the first server (default outbound).
-		cfg.Routing.Rules = append(cfg.Routing.Rules, Rule{
-			Type: "field", InboundTag: inboundTags, OutboundTag: tags[0],
-		})
+		tunnel := Rule{Type: "field", InboundTag: inboundTags, OutboundTag: tags[0]}
+		if split {
+			tunnel.Domain = splitDomains
+			tunnel.IP = splitSubnets
+			cfg.Routing.Rules = append(cfg.Routing.Rules, tunnel)
+			cfg.Routing.Rules = append(cfg.Routing.Rules, Rule{Type: "field", InboundTag: inboundTags, OutboundTag: "direct"})
+		} else {
+			cfg.Routing.Rules = append(cfg.Routing.Rules, tunnel)
+		}
 	}
 
 	return cfg, nil
+}
+
+// xrayDomainRules maps plain domain names onto Xray's "domain:" matcher (which
+// matches the domain and all its subdomains). Entries that already carry an
+// Xray matcher prefix (domain:/full:/keyword:/regexp:/geosite:) are passed
+// through unchanged, so hand-written matchers still work.
+func xrayDomainRules(domains []string) []string {
+	if len(domains) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(domains))
+	for _, d := range domains {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		if hasXrayMatcherPrefix(d) {
+			out = append(out, d)
+		} else {
+			out = append(out, "domain:"+strings.ToLower(d))
+		}
+	}
+	return out
+}
+
+func hasXrayMatcherPrefix(d string) bool {
+	for _, p := range []string{"domain:", "full:", "keyword:", "regexp:", "geosite:", "ext:"} {
+		if strings.HasPrefix(d, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func trimAll(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // Marshal renders the config as indented JSON.

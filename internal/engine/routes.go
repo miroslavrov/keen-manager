@@ -63,6 +63,17 @@ func (e *Engine) routeView(st model.State, r model.ServiceRoute) RouteView {
 		Enabled:      r.Enabled,
 		Applied:      r.Applied,
 	}
+	// Xray target: per-service ("split tunnel") routing happens inside the local
+	// Xray instance, so there is no router interface and no DNS-routing
+	// requirement. The route is live whenever its Xray connection is active.
+	if c, ok := e.routeIsXray(st, r); ok {
+		v.TargetName = c.Name
+		if r.Enabled && st.ActiveConnID != c.ID {
+			v.Note = "applies when the Xray connection \"" + c.Name + "\" is the active tunnel"
+		}
+		return v
+	}
+
 	if c, ok := findConn(st, r.TargetConnID); ok {
 		v.TargetName = c.Name
 	}
@@ -79,6 +90,20 @@ func (e *Engine) routeView(st model.State, r model.ServiceRoute) RouteView {
 		v.Note = "firmware has no native DNS routing (needs KeeneticOS 5.x)"
 	}
 	return v
+}
+
+// routeIsXray reports whether a route targets an Xray connection (by
+// TargetConnID, with no interface override). Such routes are applied by
+// compiling their domains/subnets into the active Xray config rather than via
+// the router's dns-proxy stack.
+func (e *Engine) routeIsXray(st model.State, r model.ServiceRoute) (model.Connection, bool) {
+	if strings.TrimSpace(r.TargetIface) != "" || r.TargetConnID == "" {
+		return model.Connection{}, false
+	}
+	if c, ok := findConn(st, r.TargetConnID); ok && c.Type == model.ConnXray {
+		return c, true
+	}
+	return model.Connection{}, false
 }
 
 // resolveRouteIface returns the KeeneticOS interface name a route binds to.
@@ -223,6 +248,11 @@ func (e *Engine) applyRoute(id string) error {
 	if !r.Enabled {
 		return nil
 	}
+	// Xray target: compile into the active Xray config instead of the router's
+	// dns-proxy stack (handles its own dry-run / not-active cases).
+	if _, ok := e.routeIsXray(e.store.Get(), r); ok {
+		return e.applyXrayRoute(r)
+	}
 	if e.runner.DryRun {
 		// Off-device: record as applied so the UI reflects intent.
 		e.markRouteApplied(id, nil, true)
@@ -269,9 +299,76 @@ func (e *Engine) applyRoute(id string) error {
 	return nil
 }
 
+// applyXrayRoute makes a route targeting an Xray connection live by rebuilding
+// the active Xray config with the route's domains/subnets compiled in (only the
+// matched services egress through the server; the rest goes direct). When the
+// target Xray connection is not the active tunnel, the route stays pending and
+// is compiled in automatically the next time that connection is activated.
+func (e *Engine) applyXrayRoute(r model.ServiceRoute) error {
+	st := e.store.Get()
+	c, ok := findConn(st, r.TargetConnID)
+	if !ok || c.Type != model.ConnXray {
+		return fmt.Errorf("route %q target is not an Xray connection", r.Name)
+	}
+	if st.ActiveConnID != c.ID {
+		e.markRouteApplied(r.ID, nil, false)
+		e.Logf("route pending (xray): %s applies when %s is active", r.Name, c.Name)
+		return nil
+	}
+	if e.runner.DryRun {
+		e.markRouteApplied(r.ID, nil, true)
+		return nil
+	}
+	srv, ok := e.vault.get(c.ID)
+	if !ok {
+		return fmt.Errorf("server credentials missing from vault")
+	}
+	cfg, err := e.buildActiveXray(c.ID, srv, "")
+	if err != nil {
+		return err
+	}
+	if _, err := e.xray.Apply(cfg); err != nil {
+		return err
+	}
+	e.markRouteApplied(r.ID, nil, true)
+	e.Logf("route applied (xray split): %s -> %s", r.Name, c.Name)
+	return nil
+}
+
+// unapplyXrayRoute rebuilds the active Xray config without route r so its
+// domains stop being tunnelled. When r's connection is not active (or
+// off-device) there is nothing running to update.
+func (e *Engine) unapplyXrayRoute(r model.ServiceRoute) error {
+	st := e.store.Get()
+	c, ok := findConn(st, r.TargetConnID)
+	if !ok || c.Type != model.ConnXray || st.ActiveConnID != c.ID || e.runner.DryRun {
+		e.markRouteApplied(r.ID, nil, false)
+		return nil
+	}
+	srv, ok := e.vault.get(c.ID)
+	if !ok {
+		e.markRouteApplied(r.ID, nil, false)
+		return nil
+	}
+	cfg, err := e.buildActiveXray(c.ID, srv, r.ID)
+	if err != nil {
+		return err
+	}
+	if _, err := e.xray.Apply(cfg); err != nil {
+		return err
+	}
+	e.markRouteApplied(r.ID, nil, false)
+	e.Logf("route removed (xray split): %s", r.Name)
+	return nil
+}
+
 // unapplyRoute removes a route's object-groups + dns-proxy routes + subnet
 // routes from the router (best-effort, resilient to a downed target).
 func (e *Engine) unapplyRoute(r model.ServiceRoute) error {
+	// Xray-targeted routes are compiled into the Xray config, not the router.
+	if _, ok := e.routeIsXray(e.store.Get(), r); ok {
+		return e.unapplyXrayRoute(r)
+	}
 	if e.runner.DryRun || e.keenetic == nil {
 		e.markRouteApplied(r.ID, nil, false)
 		return nil
