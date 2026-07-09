@@ -16,6 +16,7 @@ import (
 
 	"github.com/miroslavrov/keen-manager/internal/engine"
 	"github.com/miroslavrov/keen-manager/internal/model"
+	"github.com/miroslavrov/keen-manager/internal/nfqws"
 	"github.com/miroslavrov/keen-manager/internal/platform"
 	"github.com/miroslavrov/keen-manager/internal/server"
 	"github.com/miroslavrov/keen-manager/internal/version"
@@ -92,6 +93,10 @@ COMMANDS:
                                control the nfqws2 service
   nfqws mode <MODE_AUTO|MODE_LIST|MODE_ALL>
                                set the nfqws2 mode
+  nfqws config                 print the structured nfqws2.conf (JSON)
+  nfqws set <field> <value>    set one structured nfqws2.conf field
+                               (fields: ports, policy, strategy args, …;
+                               run without args to list them)
   passwd <new-password>        set the web UI password and enable auth
   auth disable                 turn off the web UI login (recover from a lockout)
   auth status                  show whether the web UI login is enabled
@@ -260,6 +265,25 @@ func cmdNfqws(args []string) {
 			fatal("%v", err)
 		}
 		fmt.Printf("nfqws2 mode set to %s\n", args[1])
+	case "config", "show-config", "get-config":
+		v, err := eng.NfqwsConfigStructured()
+		if err != nil {
+			fatal("read nfqws2.conf: %v", err)
+		}
+		printJSON(v)
+	case "set":
+		if len(args) < 3 {
+			fatal("usage: keen-manager nfqws set <field> <value>\nfields:\n%s", nfqws.ConfFieldHelp())
+		}
+		// Join the tail so an unquoted multi-word strategy still arrives whole.
+		key, val, err := nfqws.ParseConfField(args[1], strings.Join(args[2:], " "))
+		if err != nil {
+			fatal("%v", err)
+		}
+		if err := eng.SaveNfqwsConfigStructured(map[string]any{key: val}); err != nil {
+			fatal("%v", err)
+		}
+		fmt.Printf("nfqws2 %s set to %v\n", strings.ToLower(args[1]), val)
 	default:
 		fatal("unknown nfqws subcommand %q", args[0])
 	}
