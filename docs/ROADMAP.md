@@ -16,6 +16,46 @@ AWG2).
 
 ---
 
+## Session 10 — nfqws as a routable interface via tpws (P1)
+
+- [~] **DPI bypass exposed as ONE routable KeeneticOS Proxy interface**
+  (`feat(tpws)` ddc0a8e + `feat(engine)` 32ac213 + `feat(web)` 6c32b96) —
+  the user-clarified P1 ("nfqws like Xray: a routable IP:port, not a global
+  inline NFQUEUE"). Implemented in backend + UI, pending on-device
+  validation. Mirrors the Xray proxy-connection plumbing 1:1: keen-manager
+  runs a local **tpws** (zapret's socket desync proxy) in SOCKS mode on
+  `127.0.0.1:10809` and registers ONE managed `ProxyN` → that port
+  (`State.ManagedBypassIface`); chosen domains are routed through it
+  per-service via the same `dns-proxy route` stack as AWG/Xray. Domains are
+  the SAME source as Routes (a route targets the reserved **`bypass`**
+  target; picker group "DPI Bypass"); the tpws desync **strategy** lives on
+  the Bypass page; default **Discord + YouTube** routes are seeded from
+  `internal/presets` on first enable (guarded by `Bypass.Seeded`). SAME
+  anti-loop rule as beta.9 — the bypass `ProxyN` is a per-service routing
+  TARGET only, never `ip global`. Defensive: an absent tpws binary or Proxy
+  client component degrades to a logged hint (never bricks); every device
+  effect is dry-run aware. Model: `model.Bypass` + `State.ManagedBypassIface`;
+  API `GET/PUT /api/bypass`. Unit-tested (tpws argv/init-script/detection;
+  engine sentinel resolution, seed-once, port validation, teardown, view);
+  `go build/vet/test` + mipsle/arm64 cross + web bundle (tsc + vitest 17) green.
+- [ ] **P0 (still outstanding) — exact Proxy RCI shape + "internet" flag:**
+  device read-back not yet captured (HANDOFF §0 command block; do NOT guess).
+  `proxyInterfaceBody` remains the isolated best-guess shared by BOTH the Xray
+  and bypass Proxy interfaces; a rejected write degrades to a hint/TPROXY.
+- [ ] **On-device validation (session 10 — top priority):**
+  (a) confirm `tpws` is in the opkg feeds (`opkg update; opkg list | grep -i
+  tpws`) and install it — if absent, discuss with the user (no socket proxy →
+  no routable bypass interface; global inline NFQUEUE remains but isn't what
+  was asked). (b) enable the feature → one `ProxyN` in Other Connections →
+  Proxy, upstream `127.0.0.1:10809`, socks5, connected. (c) KEY: tpws SOCKS
+  actually desyncs — a domain blocked directly is reachable via
+  `curl -x socks5h://127.0.0.1:10809 https://<blocked>/`. (d) a route on
+  target "DPI Bypass" tunnels only those domains; the rest stays direct.
+  (e) tune the tpws `--split-*/--disorder/--oob/...` strategy for the ISP.
+  (f) disable → `ProxyN` removed, tpws stopped, routes kept (pending).
+
+---
+
 ## Session 9 — on-device bug fixes (Xray proxy loop; route editing)
 
 - [x] **Routing-loop fix (`fix(engine)`).** The managed `ProxyN` (SOCKS exit
