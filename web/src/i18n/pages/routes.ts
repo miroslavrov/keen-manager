@@ -15,9 +15,11 @@ export const routes = {
     targetLabel: 'Route through',
     targetPlaceholder: 'Select a target',
     targetHint:
-      'Route through a keen-manager AmneziaWG connection or any WireGuard interface on the router (pulled live from KeeneticOS). Xray connections carry traffic transparently and can’t back a route — use a policy instead.',
+      'Route through a keen-manager AmneziaWG connection, a WireGuard interface on the router (pulled live from KeeneticOS), or an Xray connection. For Xray the selected services go through the tunnel and everything else stays direct — keen-manager is the single exit point and does the split under the hood.',
     groupConnections: 'keen-manager connections',
     groupInterfaces: 'Router interfaces',
+    groupXray: 'Xray tunnels',
+    xrayTargetHint: 'selected services via Xray, the rest direct',
     ifaceDown: 'down',
     dnsUnavailable:
       'Native DNS routing isn’t available on this firmware, so routes can’t be applied — it needs KeeneticOS 5.x with AWG2 support.',
@@ -110,9 +112,11 @@ export const routes = {
     targetLabel: 'Направить через',
     targetPlaceholder: 'Выберите цель',
     targetHint:
-      'Маршрут через AmneziaWG-подключение keen-manager или любой WireGuard-интерфейс роутера (тянется вживую из KeeneticOS). Xray ведёт трафик прозрачно и не может быть целью — для него используйте политику.',
+      'Маршрут через AmneziaWG-подключение keen-manager, WireGuard-интерфейс роутера (тянется вживую из KeeneticOS) или Xray-подключение. Для Xray выбранные сервисы идут через туннель, остальное — напрямую: keen-manager остаётся единой точкой выхода и делает разделение под капотом.',
     groupConnections: 'Подключения keen-manager',
     groupInterfaces: 'Интерфейсы роутера',
+    groupXray: 'Xray-туннели',
+    xrayTargetHint: 'выбранные сервисы через Xray, остальное напрямую',
     ifaceDown: 'выкл',
     dnsUnavailable:
       'На этой прошивке штатная DNS-маршрутизация недоступна, применить маршруты нельзя — нужен KeeneticOS 5.x с поддержкой AWG2.',

@@ -129,12 +129,23 @@ export function RoutesPage() {
     refetchInterval: 15000,
   })
 
-  // Connection targets: only native-interface connections (AmneziaWG) can back a
-  // router-native dns-proxy route. Xray carries traffic transparently.
+  // AmneziaWG connections back a router-native dns-proxy route (via their native
+  // WireguardN interface).
   const connOptions = React.useMemo<TargetOption[]>(
     () =>
       (connections ?? [])
         .filter((c) => c.type === 'awg')
+        .map((c) => ({ value: `conn:${c.id}`, label: c.name, hint: c.location })),
+    [connections],
+  )
+
+  // Xray connections are also valid targets now: the daemon compiles the route
+  // into the active Xray config as split-tunnel routing (selected services via
+  // the tunnel, everything else direct). Same "conn:<id>" encoding.
+  const xrayOptions = React.useMemo<TargetOption[]>(
+    () =>
+      (connections ?? [])
+        .filter((c) => c.type === 'xray')
         .map((c) => ({ value: `conn:${c.id}`, label: c.name, hint: c.location })),
     [connections],
   )
@@ -161,8 +172,8 @@ export function RoutesPage() {
   )
 
   const allValues = React.useMemo(
-    () => [...connOptions, ...ifaceOptions].map((o) => o.value),
-    [connOptions, ifaceOptions],
+    () => [...connOptions, ...xrayOptions, ...ifaceOptions].map((o) => o.value),
+    [connOptions, xrayOptions, ifaceOptions],
   )
   const hasTarget = allValues.length > 0
   const [target, setTarget] = React.useState<string>('')
@@ -182,6 +193,7 @@ export function RoutesPage() {
 
       <TargetPicker
         connOptions={connOptions}
+        xrayOptions={xrayOptions}
         ifaceOptions={ifaceOptions}
         value={target}
         onChange={setTarget}
@@ -212,6 +224,7 @@ export function RoutesPage() {
 
 function TargetPicker({
   connOptions,
+  xrayOptions,
   ifaceOptions,
   value,
   onChange,
@@ -219,6 +232,7 @@ function TargetPicker({
   note,
 }: {
   connOptions: TargetOption[]
+  xrayOptions: TargetOption[]
   ifaceOptions: TargetOption[]
   value: string
   onChange: (v: string) => void
@@ -226,7 +240,12 @@ function TargetPicker({
   note?: string
 }) {
   const t = useT()
-  const hasAny = connOptions.length > 0 || ifaceOptions.length > 0
+  const hasAny =
+    connOptions.length > 0 || xrayOptions.length > 0 || ifaceOptions.length > 0
+  // Native DNS routing only gates the AWG/interface (dns-proxy) path; Xray
+  // routes are compiled into the Xray config and don't need it, so the warning
+  // is suppressed when the only available targets are Xray tunnels.
+  const dnsMatters = connOptions.length > 0 || ifaceOptions.length > 0
   return (
     <Card>
       <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
@@ -237,7 +256,7 @@ function TargetPicker({
           <p className="mt-0.5 text-xs text-muted-foreground">
             {t('routes.targetHint')}
           </p>
-          {!dnsAvailable ? (
+          {!dnsAvailable && dnsMatters ? (
             <p className="mt-1 text-xs text-warning">
               {t('routes.dnsUnavailable')}
             </p>
@@ -272,7 +291,28 @@ function TargetPicker({
                   ))}
                 </SelectGroup>
               ) : null}
-              {connOptions.length > 0 && ifaceOptions.length > 0 ? (
+              {connOptions.length > 0 && xrayOptions.length > 0 ? (
+                <SelectSeparator />
+              ) : null}
+              {xrayOptions.length > 0 ? (
+                <SelectGroup>
+                  <SelectLabel className="flex items-center gap-1.5">
+                    <Cloud className="h-3.5 w-3.5" />
+                    {t('routes.groupXray')}
+                  </SelectLabel>
+                  {xrayOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                      <span className="text-muted-foreground">
+                        {' · '}
+                        {o.hint || t('routes.xrayTargetHint')}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ) : null}
+              {(connOptions.length > 0 || xrayOptions.length > 0) &&
+              ifaceOptions.length > 0 ? (
                 <SelectSeparator />
               ) : null}
               {ifaceOptions.length > 0 ? (
