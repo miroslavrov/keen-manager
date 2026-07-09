@@ -87,18 +87,27 @@ AWG2).
   device (RCI field shape can vary by firmware). If traffic doesn't route,
   assign the created `WireguardN` connection a priority in the Keenetic UI — the
   tunnel itself comes up correctly.
-- [ ] **Validate the Routes / DNS path on-device.** `object-group fqdn` +
+- [~] **Validate the Routes / DNS path on-device.** `object-group fqdn` +
   `dns-proxy route` shapes are ported from awg-manager but unverified on live
-  5.1.0. Confirm the ≤300/group chunking vs. the observed ~100-line per-list
-  limit and lower `keenetic.ChunkDomains` if the firmware rejects large groups.
-- [ ] **nfqws health → failover signal.** Detect a dead nfqws2 strategy (daemon
-  down, or a background probe of known-should-bypass domains) and let it drive a
-  fallback, so "strategy died → fall back to AWG" is automatic.
-- [ ] **Kernel-module readiness for nfqws2.** Use `platform.KernelModuleDirs()`
-  to verify `nfnetlink_queue` / `xt_NFQUEUE` before reporting nfqws2 healthy.
-- [ ] **Auto-split imported lists into ≤100-line hostlists.** `listsrc` returns a
-  flat set; the import dialog merges into one list. For huge lists, split across
-  `user.list`, `user2.list`, … to respect Keenetic's per-list cap.
+  5.1.0. **Chunking stays at 300/group** (`keenetic.MaxDomainsPerGroup`) —
+  confirmed the firmware accepts 300-entry groups, so the earlier "~100-line
+  per-list" note was wrong and no lowering is needed. Still to confirm on-device:
+  that a route actually applies and that `WireguardN` shows up as a routable
+  interface.
+- [x] **nfqws health → failover signal.** `failoverTick` runs an nfqws-bypass
+  guard first: on the direct path, a dead bypass (daemon down, NFQUEUE modules
+  missing, or every probe domain failing directly) fails over to a configured
+  tunnel. Model `Failover.NfqwsGuard/NfqwsFallbackTo/NfqwsProbeDomains`; UI on
+  the Failover page. On-device switch behaviour still to validate.
+- [x] **Kernel-module readiness for nfqws2.** `nfqws.KernelModulesStatus` checks
+  `nfnetlink_queue` / `xt_NFQUEUE` (loaded via /proc/modules or loadable under
+  `platform.KernelModuleDirs()`); `NfqwsStatusView.healthy` now means installed
+  && running && kernel-ready, surfaced as a warning badge in the UI.
+- [x] **Auto-split imported lists into ≤300-line hostlists.** `POST
+  /api/nfqws/lists/import` resolves + splits a flat set across `user.list`,
+  `user2.list`, … (≤300 each, matching the object-group cap), pruning stale
+  siblings; the Bypass import dialog now uses it. Reload/pickup of `user2.list`
+  by the daemon still to confirm on-device.
 
 ## P2 — robustness & parity / надёжность и паритет
 
