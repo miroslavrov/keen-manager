@@ -8,6 +8,7 @@ import {
   Gamepad2,
   Loader2,
   Network,
+  Pencil,
   PlayCircle,
   Plus,
   Search,
@@ -42,6 +43,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -571,6 +579,8 @@ function ActiveRoutesTab() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const deleteConfirm = useConfirm<RouteEntry>()
+  // Which route (if any) is open in the editor sheet.
+  const [editId, setEditId] = React.useState<string | null>(null)
 
   const { data: routes, isLoading } = useQuery({
     queryKey: ['routes'],
@@ -633,9 +643,17 @@ function ActiveRoutesTab() {
             route={r}
             onToggle={(enabled) => toggleMutation.mutate({ id: r.id, enabled })}
             onDelete={() => deleteConfirm.ask(r)}
+            onEdit={() => setEditId(r.id)}
           />
         ))}
       </div>
+
+      <RouteEditorSheet
+        id={editId}
+        onOpenChange={(open) => {
+          if (!open) setEditId(null)
+        }}
+      />
 
       <ConfirmDialog
         open={deleteConfirm.open}
@@ -661,10 +679,12 @@ function RouteRow({
   route,
   onToggle,
   onDelete,
+  onEdit,
 }: {
   route: RouteEntry
   onToggle: (enabled: boolean) => void
   onDelete: () => void
+  onEdit: () => void
 }) {
   const t = useT()
   const counts: string[] = []
@@ -676,43 +696,62 @@ function RouteRow({
   return (
     <Card>
       <CardContent className="flex items-center gap-3 p-4">
-        <ServiceTile
-          name={route.name}
-          category={route.category}
-          className="h-9 w-9 shrink-0 text-sm"
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium text-foreground">
-              {route.name}
-            </span>
-            {route.enabled ? (
-              route.applied ? (
-                <Badge variant="success">{t('routes.applied')}</Badge>
+        {/* The rule body is the primary click target — it opens the editor with
+            the full domain list (the user asked to tap a rule to edit it). The
+            switch and delete controls sit outside this button. */}
+        <button
+          type="button"
+          onClick={onEdit}
+          aria-label={t('routes.editRoute')}
+          className="-m-1 flex min-w-0 flex-1 items-center gap-3 rounded-md p-1 text-left transition-colors hover:bg-accent/40"
+        >
+          <ServiceTile
+            name={route.name}
+            category={route.category}
+            className="h-9 w-9 shrink-0 text-sm"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-medium text-foreground">
+                {route.name}
+              </span>
+              {route.enabled ? (
+                route.applied ? (
+                  <Badge variant="success">{t('routes.applied')}</Badge>
+                ) : (
+                  <Badge variant="warning">{t('routes.pending')}</Badge>
+                )
               ) : (
-                <Badge variant="warning">{t('routes.pending')}</Badge>
-              )
-            ) : (
-              <Badge variant="muted">{t('routes.notApplied')}</Badge>
-            )}
-          </div>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {counts.join(' · ')}
-            {route.target_name ? (
-              <>
-                {counts.length > 0 ? ' · ' : ''}
-                {t('routes.routeVia')}{' '}
-                <span className="text-foreground">{route.target_name}</span>
-                {route.target_iface ? (
-                  <span className="font-mono"> ({route.target_iface})</span>
-                ) : null}
-              </>
+                <Badge variant="muted">{t('routes.notApplied')}</Badge>
+              )}
+            </div>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {counts.join(' · ')}
+              {route.target_name ? (
+                <>
+                  {counts.length > 0 ? ' · ' : ''}
+                  {t('routes.routeVia')}{' '}
+                  <span className="text-foreground">{route.target_name}</span>
+                  {route.target_iface ? (
+                    <span className="font-mono"> ({route.target_iface})</span>
+                  ) : null}
+                </>
+              ) : null}
+            </p>
+            {route.note ? (
+              <p className="mt-1 text-xs text-warning">{route.note}</p>
             ) : null}
-          </p>
-          {route.note ? (
-            <p className="mt-1 text-xs text-warning">{route.note}</p>
-          ) : null}
-        </div>
+          </div>
+        </button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onEdit}
+          aria-label={t('routes.editRoute')}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
         <Switch
           checked={route.enabled}
           onCheckedChange={onToggle}
@@ -729,6 +768,170 @@ function RouteRow({
         </Button>
       </CardContent>
     </Card>
+  )
+}
+
+/** Side-drawer editor for an existing route. Loads the rule's full membership
+ * (GET /api/routes/{id}), lets the user edit the name, the domain list and the
+ * subnet list, and saves via PUT /api/routes/{id} — which re-applies the rule
+ * on the router with a clean teardown of the old form. */
+function RouteEditorSheet({
+  id,
+  onOpenChange,
+}: {
+  id: string | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const t = useT()
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+
+  const {
+    data: detail,
+    isLoading,
+    isError,
+  } = useQuery({
+    queryKey: ['route', id],
+    queryFn: () => api.getRoute(id as string),
+    enabled: !!id,
+  })
+
+  const [name, setName] = React.useState('')
+  const [domains, setDomains] = React.useState('')
+  const [subnets, setSubnets] = React.useState('')
+
+  // Seed the form each time a route's detail arrives.
+  React.useEffect(() => {
+    if (detail) {
+      setName(detail.name)
+      setDomains((detail.domains ?? []).join('\n'))
+      setSubnets((detail.subnets ?? []).join('\n'))
+    }
+  }, [detail])
+
+  const splitLines = (s: string) =>
+    s
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'))
+
+  const dCount = splitLines(domains).length
+  const sCount = splitLines(subnets).length
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      api.updateRoute(id as string, {
+        name: name.trim() || undefined,
+        domains: splitLines(domains),
+        subnets: splitLines(subnets),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['routes'] })
+      queryClient.invalidateQueries({ queryKey: ['route', id] })
+      queryClient.invalidateQueries({ queryKey: ['state'] })
+      toast({ variant: 'success', title: t('routes.editSaved') })
+      onOpenChange(false)
+    },
+    onError: () => toast({ variant: 'error', title: t('routes.editError') }),
+  })
+
+  const onSave = () => {
+    if (dCount === 0 && sCount === 0) {
+      toast({ variant: 'error', title: t('routes.editEmpty') })
+      return
+    }
+    saveMutation.mutate()
+  }
+
+  return (
+    <Sheet open={!!id} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="flex w-full flex-col gap-0 p-0 sm:max-w-lg"
+      >
+        <SheetHeader className="border-b border-border px-5 py-4">
+          <SheetTitle>
+            {detail
+              ? t('routes.editTitle', { name: detail.name })
+              : t('routes.editRoute')}
+          </SheetTitle>
+          <SheetDescription>{t('routes.editDesc')}</SheetDescription>
+        </SheetHeader>
+
+        {isLoading ? (
+          <div className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t('routes.editLoading')}
+          </div>
+        ) : isError ? (
+          <p className="p-5 text-sm text-destructive">
+            {t('routes.editLoadError')}
+          </p>
+        ) : (
+          <>
+            <div className="flex-1 space-y-4 overflow-y-auto p-5">
+              <div className="space-y-2">
+                <Label htmlFor="edit-name">{t('routes.customName')}</Label>
+                <Input
+                  id="edit-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={t('routes.customNamePlaceholder')}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-domains">
+                  {t('routes.editDomainsLabel')}
+                  <span className="ml-1 text-muted-foreground">· {dCount}</span>
+                </Label>
+                <Textarea
+                  id="edit-domains"
+                  value={domains}
+                  onChange={(e) => setDomains(e.target.value)}
+                  placeholder={t('routes.customDomainsPlaceholder')}
+                  className="min-h-[240px] font-mono text-xs leading-relaxed"
+                  spellCheck={false}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-subnets">
+                  {t('routes.editSubnetsLabel')}
+                  <span className="ml-1 text-muted-foreground">· {sCount}</span>
+                </Label>
+                <Textarea
+                  id="edit-subnets"
+                  value={subnets}
+                  onChange={(e) => setSubnets(e.target.value)}
+                  placeholder={t('routes.customSubnetsPlaceholder')}
+                  className="min-h-[80px] font-mono text-xs leading-relaxed"
+                  spellCheck={false}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t('routes.chunkHint')}
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                onClick={onSave}
+                disabled={saveMutation.isPending}
+                className="gap-1.5"
+              >
+                {saveMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                {t('routes.editSave')}
+              </Button>
+            </div>
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
   )
 }
 

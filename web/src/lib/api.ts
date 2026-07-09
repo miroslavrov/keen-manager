@@ -30,6 +30,7 @@ import type {
   NfqwsList,
   Ok,
   PresetCatalog,
+  RouteDetail,
   RouteEntry,
   Server,
   Settings,
@@ -313,6 +314,41 @@ export const api = {
         id: `route-${Date.now()}`,
         name: body.name ?? body.preset_id ?? 'Custom route',
         preset_id: body.preset_id,
+        domain_count: body.domains?.length ?? 0,
+        subnet_count: body.subnets?.length ?? 0,
+        target_conn_id: body.target_conn_id,
+        target_iface: body.target_iface,
+        enabled: true,
+        applied: false,
+      }),
+    ),
+
+  // Full membership for opening a rule in the editor (list view carries counts).
+  getRoute: (id: string) =>
+    withMock<RouteDetail>(
+      () => request(`/routes/${id}`),
+      () => {
+        const r =
+          mocks.mockRoutes.find((x) => x.id === id) ?? mocks.mockRoutes[0]
+        return { ...r, domains: [], subnets: [] }
+      },
+    ),
+
+  updateRoute: (
+    id: string,
+    body: {
+      name?: string
+      domains?: string[]
+      subnets?: string[]
+      target_conn_id?: string
+      target_iface?: string
+    },
+  ) =>
+    withOk<RouteEntry>(
+      () => request(`/routes/${id}`, { method: 'PUT', body }),
+      () => ({
+        id,
+        name: body.name ?? 'Route',
         domain_count: body.domains?.length ?? 0,
         subnet_count: body.subnets?.length ?? 0,
         target_conn_id: body.target_conn_id,

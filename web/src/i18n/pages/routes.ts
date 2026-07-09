@@ -100,6 +100,21 @@ export const routes = {
     deleted: 'Route deleted',
     deleteError: 'Could not delete the route',
     selectTargetFirst: 'Choose a target connection first.',
+
+    // Editor (open a rule to edit its domains/subnets)
+    editRoute: 'Edit route',
+    editHint: 'Tap a rule to edit its domains',
+    editTitle: 'Edit “{name}”',
+    editDesc:
+      'Change which domains and subnets use this route. Saving re-applies it on the router.',
+    editDomainsLabel: 'Domains',
+    editSubnetsLabel: 'Subnets (CIDR)',
+    editSave: 'Save changes',
+    editSaved: 'Route updated',
+    editError: 'Could not update the route',
+    editEmpty: 'A route needs at least one domain or subnet.',
+    editLoading: 'Loading domains…',
+    editLoadError: 'Could not load this route.',
   },
   ru: {
     title: 'Маршруты',
@@ -191,5 +206,20 @@ export const routes = {
     deleted: 'Маршрут удалён',
     deleteError: 'Не удалось удалить маршрут',
     selectTargetFirst: 'Сначала выберите целевое подключение.',
+
+    // Редактор (открыть правило и изменить домены/подсети)
+    editRoute: 'Изменить маршрут',
+    editHint: 'Нажмите на правило, чтобы изменить домены',
+    editTitle: 'Изменить «{name}»',
+    editDesc:
+      'Измените, какие домены и подсети идут через этот маршрут. Сохранение переприменит его на роутере.',
+    editDomainsLabel: 'Домены',
+    editSubnetsLabel: 'Подсети (CIDR)',
+    editSave: 'Сохранить',
+    editSaved: 'Маршрут обновлён',
+    editError: 'Не удалось обновить маршрут',
+    editEmpty: 'Нужен хотя бы один домен или подсеть.',
+    editLoading: 'Загрузка доменов…',
+    editLoadError: 'Не удалось загрузить маршрут.',
   },
 } as const

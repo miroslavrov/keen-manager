@@ -202,6 +202,14 @@ export interface RouteEntry {
   note?: string
 }
 
+/** A RouteEntry plus its full domain/subnet membership. Returned by
+ * GET /api/routes/{id} so a rule can be opened and edited. Mirrors
+ * engine.RouteDetailView. */
+export interface RouteDetail extends RouteEntry {
+  domains: string[]
+  subnets: string[]
+}
+
 /** One router interface as reported live by KeeneticOS over RCI
  * (GET /api/interfaces). Mirrors engine.InterfaceView. Powers the "pick a
  * router interface" dropdown so a route can bind to a real device interface,
