@@ -13,7 +13,7 @@
 
 ## 0. Сессии 5–13 — что сделано и что осталось
 
-### 13-я сессия (В РАБОТЕ) — НАЙДЕН корень P0-хайджека (данные с устройства наконец пришли)
+### 13-я сессия (В РАБОТЕ) — Proxy0-хайджек починен (код в main); НО 3-й прогон вскрыл: активен TPROXY и туннель НЕ несёт трафик (новый P0 — см. подраздел «3-й прогон» ниже)
 Юзер прислал **on-device read-back** (то, чего ждали все сессии с 8-й — облачная
 песочница LAN роутера не видит). Его жалоба: при включённом Xray-туннеле **весь**
 трафик (и со сплит-роутами, и без) утягивается в туннель, ничего кроме локальных
@@ -91,6 +91,80 @@ curl -s -m 8 -o /dev/null -w 'raw-ip=%{http_code}\n' https://1.1.1.1/
 curl -s -m 8 -o /dev/null -w 'by-name=%{http_code}\n' https://api.ipify.org/
 curl -s -x socks5h://127.0.0.1:10808 -m 12 https://api.ipify.org; echo  # ждём IP СЕРВЕРА
 ```
+
+#### 3-й прогон (РЕШАЮЩИЙ, туннель ВКЛючён) — АКЦЕНТ СМЕЩАЕТСЯ: активен TPROXY, а туннель не несёт трафик
+Юзер включил подписку `blanc` и снял данные при живом Xray. Вывод переворачивает
+приоритет — мой session-13 фикс Proxy0 верен, но лечит НЕ тот режим, что сейчас активен.
+
+**1) Устройство СЕЙЧАС в режиме TPROXY, НЕ proxy-connection.** Лог keen-manager при
+активации ставит transparent-proxy capture (НЕ Proxy-интерфейс):
+```
+exec: /opt/sbin/iptables -t mangle -N KEENMGR_TPROXY
+exec: /opt/sbin/iptables -t mangle -A KEENMGR_TPROXY -m mark --mark 255 -j RETURN
+   ...(RETURN на все приватные подсети)...
+exec: /opt/sbin/iptables -t mangle -A KEENMGR_TPROXY -p tcp -j TPROXY --on-port 12345 --tproxy-mark 0x2333/0x2333
+exec: /opt/sbin/iptables -t mangle -A KEENMGR_TPROXY -p udp -j TPROXY --on-port 12345 --tproxy-mark 0x2333/0x2333
+exec: /opt/sbin/iptables -t mangle -I PREROUTING -j KEENMGR_TPROXY
+exec: /opt/sbin/ip rule add fwmark 0x2333 lookup 993
+exec: /opt/sbin/ip route replace local default dev lo table 993
+```
+`Proxy0` при этом — брошенный огрызок: `show/interface/Proxy0` → `link:down,
+connected:no, state:up, global:false, security-level:public` (summary.layer:
+conf running, link pending, ctrl pending) ДАЖЕ когда Xray поднят и слушает
+`127.0.0.1:10808`. Proxy-интерфейс не задействован — рулит TPROXY.
+
+**2) ПОЧЕМУ TPROXY (гипотеза — проверить):** развёрнутый на устройстве билд (ДО
+session-13) создаёт `Proxy0` с `security-level:"public"` СТРОКОЙ, а RCI её отбивает
+(`no input`, ident Command::Root — подтверждено дважды). → `CreateProxyInterface`
+возвращает ошибку → `bringUpXrayProxy` латчит `proxyClientDown` → **фолбэк в TPROXY**,
+частичный create оставляет огрызок `Proxy0`. **session-13 фикс (объектная форма
+`{"security-level":{"public":true}}`) ровно это чинит** → после пере-сборки proxy-mode
+create должен пройти. Но это ОТДЕЛЬНО от проблемы #3.
+
+**3) ГЛАВНАЯ НЕРЕШЁННАЯ ПРОБЛЕМА (P0): туннель НЕ несёт трафик (в любом режиме).**
+`select-best` валит ВСЕХ кандидатов `blanc` на пост-активационной пробе:
+```
+activating 🇫🇮 Финляндия, Extra Whitelist2 (previous active: "")
+exec: /opt/sbin/xray -test -config .../config.json.tmp -format json     ← ПРОХОДИТ
+exec: /opt/etc/init.d/S99xray restart
+   ...(ставит KEENMGR_TPROXY)...
+post-activate probe failed for 🇸🇪 Sweden, Extra Whitelist (target=https://www.gstatic.com/generate_204: context deadline exceeded) — rolling back to ""
+select-best: ... the tunnel did not carry traffic to https://www.gstatic.com/generate_204 (context deadline exceeded); rolled back — check the server is reachable and not DPI-blocked, or set a different probe target on the Failover page
+```
+Xray РАБОТАЕТ (`23761 /opt/sbin/xray run -confdir /opt/etc/keen-manager/xray`,
+`tcp 127.0.0.1:10808 LISTEN`), `xray -test` проходит, но
+`curl -x socks5h://127.0.0.1:10808 https://api.ipify.org` → ПУСТО (наружу молчит).
+И в TPROXY при мёртвом туннеле + активном capture ВЕСЬ роутер/LAN теряет интернет:
+сразу после активации `raw-ip=000 (8s), by-name=000 (8s)` — вот оно «включаю подписку
+→ всё умирает». Когда Xray НЕ активен, capture снят → интернет ок (отсюда «падает
+соединение → всё ок»).
+
+**4) Наш RCI-hardening Proxy0 сработал и УДЕРЖАЛСЯ, но к текущему сбою не относится**
+(сбой через TPROXY, не через Proxy0). Подтверждённые формы RCI (на устройстве):
+- `ip global false` → `"Proxy0": global priority cleared` (потом в `show/interface` `global:false`).
+- `ip name-servers false` → `ignore IPv4 name servers`; `ipv6 name-servers false` → `ignore IPv6 name servers`.
+- `security-level` СТРОКОЙ → ERROR `no input`; нужна ОБЪЕКТНАЯ форма `{"security-level":{"public":true}}` (session-13 фикс уже так делает).
+- `show/interface/Proxy0` даёт: `link/connected/state/global/security-level` + `summary.layer{conf,link,ipv4,ipv6,ctrl}` — полезный шейп статуса.
+- keen-manager пишет лог в `/opt/var/log/keen-manager.log`. Xray-конфиг: `/opt/etc/keen-manager/xray/`, бинарь `/opt/sbin/xray`, init `/opt/etc/init.d/S99xray`.
+
+**5) ПРИОРИТЕТЫ СЛЕДУЮЩЕМУ АГЕНТУ (юзер просил пока КОД НЕ править):**
+- **P0 — почему туннель не несёт трафик** (реальный блокер, НЕ роутинг/хайджек). Снять
+  СОБСТВЕННЫЕ логи Xray (не только keen-manager.log): куда пишет `S99xray`/xray-конфиг
+  (`log` в `/opt/etc/keen-manager/xray/`), запустить `xray run` руками и смотреть stderr
+  на живой хендшейк к vless. Проверить: (a) рвёт ли DPI reality/TLS к серверам blanc
+  (наиболее вероятно на этом ISP — см. прошлые сессии, «Extra Whitelist/Whitelist2»);
+  (b) доступность endpoint'ов (tcp-connect); (c) не блокирован ли `gstatic/generate_204`
+  (сменить probe-target на Failover — но юзер: «вообще ничего», значит туннель реально
+  мёртв, не только проба); (d) идёт ли собственный egress Xray в WAN при TPROXY
+  (исключение по `mark 255`); (e) `0.0.0.0/0 gateway 0.0.0.0` в `show/ip/route` — свериться,
+  что WAN-дефолт корректен.
+- **P1 — режим:** `proxyClientDown` мог залатчиться в текущем процессе демона (из-за
+  string-create) → рестарт сервиса (`/opt/etc/init.d/S99keen-manager restart`) сбросит
+  латч. С object-form фиксом (после пере-сборки) proxy-create пройдёт → сравнить, несёт
+  ли трафик proxy-mode (Proxy0 `connected:yes`?) vs TPROXY. Решить дефолт.
+- **P2 — после пере-сборки на устройстве:** proxy-create без `no input`; `Proxy0
+  connected:yes`; global остаётся clear при реконнекте (не пере-навешивает ли firmware);
+  маршрут на Proxy0 форвардит выбранные домены. Тогда — тег stable/rc.
 
 ### 12-я сессия (ЗАКРЫТА) — CLI + качество failover + nfqws2-паритет + дашборд; rc.2
 Только код-сайд полировка к стабильной (LAN роутера из облачной песочницы
