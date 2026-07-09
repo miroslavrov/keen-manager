@@ -68,6 +68,11 @@ func (e *Engine) Activate(id string) error {
 	e.Logf("active connection is now %s", c.Name)
 	e.publishState()
 	go e.probeOne(id)
+	// Newly-activated AWG connections may now have a native interface that
+	// enabled-but-pending service routes were waiting for; re-apply them.
+	if c.Type == model.ConnAWG {
+		go e.reconcileRoutes()
+	}
 	return nil
 }
 

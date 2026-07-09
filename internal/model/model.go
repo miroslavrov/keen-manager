@@ -154,6 +154,33 @@ type Subscription struct {
 	ServerIDs []string `json:"server_ids,omitempty"`
 }
 
+// ServiceRoute sends a set of domains (and/or subnets) through a specific
+// connection's native interface using Keenetic's dns-proxy route + object-group
+// stack — the router's "Маршруты/DNS" section. A route may be built from a
+// built-in service preset (PresetID) or from a custom domain list.
+type ServiceRoute struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	PresetID string `json:"preset_id,omitempty"`
+	Category string `json:"category,omitempty"`
+	Icon     string `json:"icon,omitempty"`
+	// Domains / Subnets are the effective, resolved membership (a preset's
+	// lists are snapshotted here at creation so a route is self-contained).
+	Domains []string `json:"domains,omitempty"`
+	Subnets []string `json:"subnets,omitempty"`
+	// TargetConnID is the connection whose native interface receives the
+	// routed traffic. It must resolve to a KeeneticOS native interface
+	// (an AWG2 WireguardN); Xray connections route transparently and are not
+	// valid dns-proxy targets.
+	TargetConnID string `json:"target_conn_id"`
+	Enabled      bool   `json:"enabled"`
+	// Groups are the object-group names created on the router for this route,
+	// recorded so the exact set can be torn down or reconciled later.
+	Groups    []string  `json:"groups,omitempty"`
+	Applied   bool      `json:"applied,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // FailoverEvent records one automatic switch.
 type FailoverEvent struct {
 	Time   time.Time `json:"time"`
@@ -199,6 +226,7 @@ type Settings struct {
 type State struct {
 	Connections   []Connection   `json:"connections"`
 	Subscriptions []Subscription `json:"subscriptions"`
+	Routes        []ServiceRoute `json:"routes,omitempty"`
 	Failover      Failover       `json:"failover"`
 	Settings      Settings       `json:"settings"`
 	ActiveConnID  string         `json:"active_conn_id"`

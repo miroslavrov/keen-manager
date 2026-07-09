@@ -41,6 +41,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/subscriptions/{id}/servers", s.requireAuth(s.handleSubscriptionServers))
 	mux.HandleFunc("POST /api/subscriptions/{id}/select-best", s.requireAuth(s.handleSelectBest))
 
+	// Routes / "Маршруты" (per-service domain routing).
+	mux.HandleFunc("GET /api/routes", s.requireAuth(s.handleRoutes))
+	mux.HandleFunc("POST /api/routes", s.requireAuth(s.handleCreateRoute))
+	mux.HandleFunc("GET /api/routes/presets", s.requireAuth(s.handleRoutePresets))
+	mux.HandleFunc("PUT /api/routes/{id}/toggle", s.requireAuth(s.handleToggleRoute))
+	mux.HandleFunc("DELETE /api/routes/{id}", s.requireAuth(s.handleDeleteRoute))
+
 	// nfqws2.
 	mux.HandleFunc("GET /api/nfqws", s.requireAuth(s.handleNfqws))
 	mux.HandleFunc("POST /api/nfqws/action", s.requireAuth(s.handleNfqwsAction))
@@ -212,6 +219,63 @@ func (s *Server) handleSelectBest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "selected_id": id})
+}
+
+// ----- routes / "Маршруты" -----
+
+func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.eng.Routes())
+}
+
+func (s *Server) handleRoutePresets(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.eng.RoutePresets())
+}
+
+func (s *Server) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name         string   `json:"name"`
+		PresetID     string   `json:"preset_id"`
+		Domains      []string `json:"domains"`
+		Subnets      []string `json:"subnets"`
+		TargetConnID string   `json:"target_conn_id"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(body.TargetConnID) == "" {
+		writeErr(w, http.StatusBadRequest, "target_conn_id is required")
+		return
+	}
+	v, err := s.eng.CreateRoute(body.Name, body.PresetID, body.Domains, body.Subnets, body.TargetConnID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) handleToggleRoute(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := s.eng.SetRouteEnabled(r.PathValue("id"), body.Enabled); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeOK(w)
+}
+
+func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
+	if err := s.eng.DeleteRoute(r.PathValue("id")); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeOK(w)
 }
 
 // ----- nfqws2 -----

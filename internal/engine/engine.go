@@ -128,6 +128,8 @@ func (e *Engine) Start(ctx context.Context) {
 		case <-time.After(3 * time.Second): // let the WAN settle first
 		}
 		e.reconcile()
+		// Re-apply any service routes whose target tunnel is back up.
+		e.reconcileRoutes()
 	}()
 }
 

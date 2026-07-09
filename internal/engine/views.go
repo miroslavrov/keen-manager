@@ -66,11 +66,32 @@ type ConnView struct {
 // ConnDetailView adds config/traffic detail for the single-connection endpoint.
 type ConnDetailView struct {
 	ConnView
-	ConfigPreview string `json:"config_preview,omitempty"`
-	HandshakeAgeS int    `json:"handshake_age_s,omitempty"`
-	RxBytes       int64  `json:"rx_bytes,omitempty"`
-	TxBytes       int64  `json:"tx_bytes,omitempty"`
-	Protocol      string `json:"protocol,omitempty"`
+	ConfigPreview string          `json:"config_preview,omitempty"`
+	HandshakeAgeS int             `json:"handshake_age_s,omitempty"`
+	RxBytes       int64           `json:"rx_bytes,omitempty"`
+	TxBytes       int64           `json:"tx_bytes,omitempty"`
+	Protocol      string          `json:"protocol,omitempty"`
+	Integration   IntegrationView `json:"integration"`
+}
+
+// IntegrationView explains how a connection surfaces on the router — the answer
+// to "why don't I see this in the Keenetic UI?". AWG tunnels become native
+// WireguardN interfaces (visible, assignable to a policy); Xray connections
+// capture traffic transparently and are intentionally invisible as interfaces.
+type IntegrationView struct {
+	// Mode is one of: "native-interface", "userspace-awg", "transparent-proxy".
+	Mode string `json:"mode"`
+	// VisibleInRouter reports whether this connection shows up as an interface
+	// in the Keenetic web UI.
+	VisibleInRouter bool `json:"visible_in_router"`
+	// Interface is the native NDMS interface name (e.g. "Wireguard1") once the
+	// tunnel is up on the native path; empty otherwise.
+	Interface string `json:"interface,omitempty"`
+	// Summary is a short human explanation for the UI.
+	Summary string `json:"summary"`
+	// RoutableTarget reports whether this connection can be a Routes target
+	// (only native interfaces can back a dns-proxy route).
+	RoutableTarget bool `json:"routable_target"`
 }
 
 // ServerView is one server inside a subscription.
@@ -122,6 +143,41 @@ type StateView struct {
 	Failover           model.Failover        `json:"failover"`
 	Wan                WanView               `json:"wan"`
 	KillSwitch         bool                  `json:"kill_switch"`
+}
+
+// RouteView is one configured service route (Routes / "Маршруты").
+type RouteView struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	PresetID     string `json:"preset_id,omitempty"`
+	Category     string `json:"category,omitempty"`
+	Icon         string `json:"icon,omitempty"`
+	DomainCount  int    `json:"domain_count"`
+	SubnetCount  int    `json:"subnet_count"`
+	TargetConnID string `json:"target_conn_id"`
+	TargetName   string `json:"target_name,omitempty"`
+	TargetIface  string `json:"target_iface,omitempty"`
+	Enabled      bool   `json:"enabled"`
+	Applied      bool   `json:"applied"`
+	Note         string `json:"note,omitempty"`
+}
+
+// PresetView is one entry in the built-in service catalog.
+type PresetView struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Icon        string `json:"icon,omitempty"`
+	Notice      string `json:"notice,omitempty"`
+	DomainCount int    `json:"domain_count"`
+	SubnetCount int    `json:"subnet_count"`
+	HasSub      bool   `json:"has_subscription"`
+}
+
+// PresetCatalogView is GET /api/routes/presets.
+type PresetCatalogView struct {
+	Categories []string     `json:"categories"`
+	Presets    []PresetView `json:"presets"`
 }
 
 // NfqwsConfigView is GET/PUT /api/nfqws/config.

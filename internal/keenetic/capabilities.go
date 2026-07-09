@@ -29,6 +29,12 @@ type Capabilities struct {
 	// interfaces are available and Entware's awg-quick fallback (see the
 	// sibling internal/awg package) should be used instead.
 	HasWireguard bool
+
+	// SupportsDNSRoute reports whether the firmware exposes the native
+	// domain-routing stack (object-group fqdn + dns-proxy route) used by the
+	// Routes/"Маршруты" feature. This landed with KeeneticOS 5.x, so it is
+	// gated on a 5.0+ release.
+	SupportsDNSRoute bool
 }
 
 // versionResponse is the subset of "GET /show/version" fields we care about.
@@ -81,11 +87,23 @@ func DetectCapabilities(ctx context.Context, c *Client) (Capabilities, error) {
 	}
 
 	return Capabilities{
-		Release:      release,
-		Components:   components,
-		SupportsAWG2: isAtLeast501A3(release),
-		HasWireguard: hasWireguard,
+		Release:          release,
+		Components:       components,
+		SupportsAWG2:     isAtLeast501A3(release),
+		HasWireguard:     hasWireguard,
+		SupportsDNSRoute: isAtLeast5(release),
 	}, nil
+}
+
+// isAtLeast5 reports whether release is KeeneticOS 5.0 or newer (the floor for
+// the native domain-routing stack). Unparsable/empty strings are treated as
+// "too old" (conservative: the feature simply won't be offered).
+func isAtLeast5(release string) bool {
+	v, ok := parseKeeneticVersion(release)
+	if !ok {
+		return false
+	}
+	return v.major >= 5
 }
 
 func splitComponents(s string) []string {

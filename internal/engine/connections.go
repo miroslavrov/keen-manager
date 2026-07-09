@@ -83,7 +83,46 @@ func (e *Engine) Connection(id string) (ConnDetailView, error) {
 		d.RxBytes = rs.RxBytes
 		d.TxBytes = rs.TxBytes
 	}
+	d.Integration = e.integrationOf(c)
 	return d, nil
+}
+
+// integrationOf explains how a connection is exposed to the router — the
+// answer to the common "I added it but nothing shows up in the Keenetic UI"
+// confusion. It is deliberately honest about the transparent-proxy path.
+func (e *Engine) integrationOf(c model.Connection) IntegrationView {
+	switch c.Type {
+	case model.ConnAWG:
+		if iface, ok := e.nativeIface(c.ID); ok && iface != "" {
+			return IntegrationView{
+				Mode:            "native-interface",
+				VisibleInRouter: true,
+				Interface:       iface,
+				RoutableTarget:  true,
+				Summary:         "Shown in the Keenetic UI as interface " + iface + " (Other Connections). Give it a connection priority there, or send specific services through it from the Routes page.",
+			}
+		}
+		if e.useNativeAWG() {
+			return IntegrationView{
+				Mode:            "native-interface",
+				VisibleInRouter: true,
+				RoutableTarget:  true,
+				Summary:         "Activate this tunnel and it is created as a native AmneziaWG (Wireguard) interface, visible in the Keenetic UI and usable as a Routes target.",
+			}
+		}
+		return IntegrationView{
+			Mode:            "userspace-awg",
+			VisibleInRouter: false,
+			Summary:         "Runs as an Entware userspace tunnel (awg-quick). It is not shown in the Keenetic UI — native AmneziaWG needs KeeneticOS 5.1+.",
+		}
+	case model.ConnXray:
+		return IntegrationView{
+			Mode:            "transparent-proxy",
+			VisibleInRouter: false,
+			Summary:         "vless/vmess connections run inside keen-manager's local Xray and capture traffic transparently (TPROXY). Nothing appears as a router interface — this is expected. Scope which traffic uses it with a kill switch or per-service rules.",
+		}
+	}
+	return IntegrationView{Mode: "unknown", Summary: "Unknown connection type."}
 }
 
 // CreateConnection adds an AWG tunnel (from a pasted .conf) or an Xray outbound
@@ -191,6 +230,13 @@ func (e *Engine) DeleteConnection(id string) error {
 	if !ok {
 		return fmt.Errorf("connection %s not found", id)
 	}
+	// Tear down any service routes targeting this connection first (removes
+	// their object-groups/dns-proxy routes from the router), then the tunnel.
+	for _, r := range st.Routes {
+		if r.TargetConnID == id {
+			_ = e.unapplyRoute(r)
+		}
+	}
 	// Best-effort teardown before removal.
 	_ = e.bringDown(c)
 
@@ -214,6 +260,16 @@ func (e *Engine) DeleteConnection(id string) error {
 		s.Failover.Chain = removeString(s.Failover.Chain, id)
 		for i := range s.Subscriptions {
 			s.Subscriptions[i].ServerIDs = removeString(s.Subscriptions[i].ServerIDs, id)
+		}
+		// Drop service routes that targeted this connection.
+		if len(s.Routes) > 0 {
+			routes := s.Routes[:0]
+			for _, r := range s.Routes {
+				if r.TargetConnID != id {
+					routes = append(routes, r)
+				}
+			}
+			s.Routes = routes
 		}
 		return nil
 	})
