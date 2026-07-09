@@ -168,12 +168,18 @@ type ServiceRoute struct {
 	// lists are snapshotted here at creation so a route is self-contained).
 	Domains []string `json:"domains,omitempty"`
 	Subnets []string `json:"subnets,omitempty"`
-	// TargetConnID is the connection whose native interface receives the
-	// routed traffic. It must resolve to a KeeneticOS native interface
-	// (an AWG2 WireguardN); Xray connections route transparently and are not
-	// valid dns-proxy targets.
-	TargetConnID string `json:"target_conn_id"`
-	Enabled      bool   `json:"enabled"`
+	// TargetConnID is the keen-manager connection whose native interface
+	// receives the routed traffic. It must resolve to a KeeneticOS native
+	// interface (an AWG2 WireguardN); Xray connections route transparently and
+	// are not valid dns-proxy targets. Optional when TargetIface is set.
+	TargetConnID string `json:"target_conn_id,omitempty"`
+	// TargetIface binds the route directly to a KeeneticOS interface by name
+	// (e.g. "Wireguard0"), independent of any keen-manager connection — used
+	// when the user routes through a router interface they picked from the live
+	// interface list (including WireGuard interfaces created in the Keenetic UI
+	// itself). Takes precedence over TargetConnID when set.
+	TargetIface string `json:"target_iface,omitempty"`
+	Enabled     bool   `json:"enabled"`
 	// Groups are the object-group names created on the router for this route,
 	// recorded so the exact set can be torn down or reconciled later.
 	Groups    []string  `json:"groups,omitempty"`

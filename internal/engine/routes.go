@@ -67,8 +67,11 @@ func (e *Engine) routeView(st model.State, r model.ServiceRoute) RouteView {
 		v.TargetName = c.Name
 	}
 	// Surface why a route isn't live so the UI can guide the user.
-	if iface, ok := e.nativeIface(r.TargetConnID); ok {
+	if iface, ok := e.resolveRouteIface(r); ok {
 		v.TargetIface = iface
+		if v.TargetName == "" {
+			v.TargetName = iface
+		}
 	} else if r.Enabled {
 		v.Note = "target has no native interface yet — activate its AmneziaWG connection"
 	}
@@ -78,22 +81,43 @@ func (e *Engine) routeView(st model.State, r model.ServiceRoute) RouteView {
 	return v
 }
 
+// resolveRouteIface returns the KeeneticOS interface name a route binds to.
+// A directly-pinned TargetIface wins; otherwise it resolves the target
+// connection's native interface. The bool is false when neither yields an
+// interface (e.g. a connection-targeted route whose AWG tunnel isn't up yet).
+func (e *Engine) resolveRouteIface(r model.ServiceRoute) (string, bool) {
+	if name := strings.TrimSpace(r.TargetIface); name != "" {
+		return name, true
+	}
+	return e.nativeIface(r.TargetConnID)
+}
+
 // dnsRoutingAvailable reports whether the device can apply native DNS routes.
 func (e *Engine) dnsRoutingAvailable() bool {
 	return e.keenetic != nil && !e.runner.DryRun && e.caps.SupportsDNSRoute
 }
 
 // CreateRoute builds a route from a preset (presetID) and/or explicit custom
-// domains/subnets, targeting a connection, then applies it when enabled.
-func (e *Engine) CreateRoute(name, presetID string, domains, subnets []string, targetConnID string) (RouteView, error) {
+// domains/subnets, targeting either a keen-manager connection (targetConnID)
+// or a router interface directly (targetIface, e.g. "Wireguard0" picked from
+// the live interface list), then applies it when enabled.
+func (e *Engine) CreateRoute(name, presetID string, domains, subnets []string, targetConnID, targetIface string) (RouteView, error) {
 	st := e.store.Get()
-	if _, ok := findConn(st, targetConnID); !ok {
-		return RouteView{}, fmt.Errorf("target connection %s not found", targetConnID)
+	targetConnID = strings.TrimSpace(targetConnID)
+	targetIface = strings.TrimSpace(targetIface)
+	if targetConnID == "" && targetIface == "" {
+		return RouteView{}, fmt.Errorf("a route needs a target interface or connection")
+	}
+	if targetConnID != "" {
+		if _, ok := findConn(st, targetConnID); !ok {
+			return RouteView{}, fmt.Errorf("target connection %s not found", targetConnID)
+		}
 	}
 
 	r := model.ServiceRoute{
 		ID:           newID("route"),
 		TargetConnID: targetConnID,
+		TargetIface:  targetIface,
 		Enabled:      true,
 		CreatedAt:    time.Now(),
 	}
@@ -207,9 +231,9 @@ func (e *Engine) applyRoute(id string) error {
 	if !e.dnsRoutingAvailable() {
 		return fmt.Errorf("native DNS routing unavailable (needs KeeneticOS 5.x)")
 	}
-	iface, ok := e.nativeIface(r.TargetConnID)
+	iface, ok := e.resolveRouteIface(r)
 	if !ok || iface == "" {
-		return fmt.Errorf("target connection has no native interface (activate its AmneziaWG connection first)")
+		return fmt.Errorf("route target has no native interface (activate its AmneziaWG connection first, or pick a router interface)")
 	}
 
 	ctx, cancel := context.WithTimeout(e.baseCtx(), 45*time.Second)
@@ -254,7 +278,7 @@ func (e *Engine) unapplyRoute(r model.ServiceRoute) error {
 	}
 	ctx, cancel := context.WithTimeout(e.baseCtx(), 45*time.Second)
 	defer cancel()
-	iface, _ := e.nativeIface(r.TargetConnID)
+	iface, _ := e.resolveRouteIface(r)
 	for _, group := range r.Groups {
 		if iface != "" {
 			_ = keenetic.DeleteDNSRoute(ctx, e.keenetic, group, iface)
@@ -294,7 +318,7 @@ func (e *Engine) reconcileRoutes() {
 		if !r.Enabled || r.Applied {
 			continue
 		}
-		if iface, ok := e.nativeIface(r.TargetConnID); ok && iface != "" {
+		if iface, ok := e.resolveRouteIface(r); ok && iface != "" {
 			if err := e.applyRoute(r.ID); err != nil {
 				e.Logf("reconcile route %s: %v", r.Name, err)
 			}

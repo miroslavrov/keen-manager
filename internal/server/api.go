@@ -41,6 +41,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/subscriptions/{id}/servers", s.requireAuth(s.handleSubscriptionServers))
 	mux.HandleFunc("POST /api/subscriptions/{id}/select-best", s.requireAuth(s.handleSelectBest))
 
+	// Router interfaces (live from KeeneticOS RCI) — powers the interface picker.
+	mux.HandleFunc("GET /api/interfaces", s.requireAuth(s.handleInterfaces))
+
 	// Routes / "Маршруты" (per-service domain routing).
 	mux.HandleFunc("GET /api/routes", s.requireAuth(s.handleRoutes))
 	mux.HandleFunc("POST /api/routes", s.requireAuth(s.handleCreateRoute))
@@ -227,6 +230,12 @@ func (s *Server) handleSelectBest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "selected_id": id})
 }
 
+// ----- router interfaces -----
+
+func (s *Server) handleInterfaces(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.eng.Interfaces())
+}
+
 // ----- routes / "Маршруты" -----
 
 func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
@@ -244,16 +253,17 @@ func (s *Server) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		Domains      []string `json:"domains"`
 		Subnets      []string `json:"subnets"`
 		TargetConnID string   `json:"target_conn_id"`
+		TargetIface  string   `json:"target_iface"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if strings.TrimSpace(body.TargetConnID) == "" {
-		writeErr(w, http.StatusBadRequest, "target_conn_id is required")
+	if strings.TrimSpace(body.TargetConnID) == "" && strings.TrimSpace(body.TargetIface) == "" {
+		writeErr(w, http.StatusBadRequest, "a target interface (target_iface) or connection (target_conn_id) is required")
 		return
 	}
-	v, err := s.eng.CreateRoute(body.Name, body.PresetID, body.Domains, body.Subnets, body.TargetConnID)
+	v, err := s.eng.CreateRoute(body.Name, body.PresetID, body.Domains, body.Subnets, body.TargetConnID, body.TargetIface)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return

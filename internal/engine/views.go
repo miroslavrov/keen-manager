@@ -94,6 +94,44 @@ type IntegrationView struct {
 	RoutableTarget bool `json:"routable_target"`
 }
 
+// InterfaceView is one router interface as reported by KeeneticOS (GET
+// /api/interfaces). It powers the "pick a router interface" dropdown so the UI
+// lists the device's real interfaces (pulled live over RCI) rather than only
+// keen-manager's own connections.
+type InterfaceView struct {
+	// Name is the NDMS interface id (e.g. "Wireguard0") — the value a route
+	// binds to.
+	Name string `json:"name"`
+	// Label is the human-friendly description when set, else the Name.
+	Label string `json:"label"`
+	Description string `json:"description,omitempty"`
+	// Type is the NDMS transport type ("Wireguard", "Bridge", ...).
+	Type string `json:"type"`
+	Up          bool   `json:"up"`
+	Connected   bool   `json:"connected"`
+	Address     string `json:"address,omitempty"`
+	Security    string `json:"security,omitempty"`
+	// IsWireguard marks native WireGuard/AmneziaWG interfaces.
+	IsWireguard bool `json:"is_wireguard"`
+	// Routable reports whether this interface can back a Routes dns-proxy route
+	// (a WireGuard interface that is not the router's own VPN server).
+	Routable bool `json:"routable"`
+	// ManagedConnID is the keen-manager connection that created this interface
+	// (via native AWG import), when applicable — lets the UI tie a router
+	// interface back to a connection it manages.
+	ManagedConnID string `json:"managed_conn_id,omitempty"`
+}
+
+// InterfacesView is GET /api/interfaces: the router's interfaces plus whether
+// the firmware exposes the native DNS-routing stack a route needs.
+type InterfacesView struct {
+	Interfaces          []InterfaceView `json:"interfaces"`
+	DNSRoutingAvailable bool            `json:"dns_routing_available"`
+	// Note carries a human explanation when the list is empty or degraded
+	// (e.g. RCI unreachable, or running off-device).
+	Note string `json:"note,omitempty"`
+}
+
 // ServerView is one server inside a subscription.
 type ServerView struct {
 	ID        string `json:"id"`

@@ -658,6 +658,81 @@ func TestFindFreeIndex_RequestsCorrectPath(t *testing.T) {
 	}
 }
 
+// --- ListInterfaces ----------------------------------------------------------
+
+func TestListInterfaces_ParsesAndFiltersState(t *testing.T) {
+	// Mirrors a real "GET /show/interface/" response: a running WireGuard tunnel
+	// with a full field set, a Bridge, a pending PPP (should read as not-up),
+	// and the router's own built-in WireGuard VPN server.
+	c, cs := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"Wireguard0": {"id":"Wireguard0","interface-name":"nwg0","type":"Wireguard","description":"NL tunnel","state":"up","link":"up","connected":"yes","security-level":"public","address":"10.0.0.2","mask":"255.255.255.255","priority":700},
+			"Bridge0": {"id":"Bridge0","interface-name":"br0","type":"Bridge","state":"up","link":"up","security-level":"private","address":"192.168.1.1"},
+			"PPPoE0": {"id":"PPPoE0","type":"PPP","state":"pending","link":"pending","connected":"no"},
+			"Wireguard1": {"id":"Wireguard1","type":"Wireguard","description":"Wireguard VPN Server","state":"up","link":"up"}
+		}`))
+	})
+
+	infos, err := ListInterfaces(context.Background(), c)
+	if err != nil {
+		t.Fatalf("ListInterfaces: %v", err)
+	}
+	if cs.lastPath != "/rci/show/interface/" {
+		t.Errorf("path = %s, want /rci/show/interface/", cs.lastPath)
+	}
+	if len(infos) != 4 {
+		t.Fatalf("got %d interfaces, want 4", len(infos))
+	}
+	// Sorted by name: Bridge0, PPPoE0, Wireguard0, Wireguard1.
+	byName := map[string]InterfaceInfo{}
+	for _, in := range infos {
+		byName[in.Name] = in
+	}
+
+	wg := byName["Wireguard0"]
+	if !wg.IsWireguard {
+		t.Error("Wireguard0.IsWireguard = false, want true")
+	}
+	if !wg.Up || !wg.Connected {
+		t.Errorf("Wireguard0 up/connected = %v/%v, want true/true", wg.Up, wg.Connected)
+	}
+	if wg.Description != "NL tunnel" || wg.Address != "10.0.0.2" || wg.Priority != 700 {
+		t.Errorf("Wireguard0 fields = %+v", wg)
+	}
+
+	if byName["Bridge0"].IsWireguard {
+		t.Error("Bridge0.IsWireguard = true, want false")
+	}
+
+	ppp := byName["PPPoE0"]
+	if ppp.Up || ppp.Connected {
+		t.Errorf("PPPoE0 up/connected = %v/%v, want false/false (pending is not up)", ppp.Up, ppp.Connected)
+	}
+
+	if !byName["Wireguard1"].IsBuiltInVPNServer() {
+		t.Error("Wireguard1 should be recognised as the built-in VPN server (by description)")
+	}
+	if byName["Wireguard0"].IsBuiltInVPNServer() {
+		t.Error("Wireguard0 must NOT be flagged as the built-in VPN server")
+	}
+}
+
+func TestListInterfaces_ToleratesMalformedEntry(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// Second entry is a bare string, not an object — must be skipped, not fatal.
+		_, _ = w.Write([]byte(`{"Wireguard0": {"id":"Wireguard0","type":"Wireguard"}, "Weird": "not-an-object"}`))
+	})
+	infos, err := ListInterfaces(context.Background(), c)
+	if err != nil {
+		t.Fatalf("ListInterfaces: %v", err)
+	}
+	if len(infos) != 1 || infos[0].Name != "Wireguard0" {
+		t.Errorf("infos = %+v, want a single Wireguard0 (malformed entry skipped)", infos)
+	}
+}
+
 // --- InterfaceStatus / PeerStatus --------------------------------------------
 
 func TestInterfaceStatus_ParsesPeersAndNeverSentinel(t *testing.T) {
