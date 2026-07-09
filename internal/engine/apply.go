@@ -259,9 +259,6 @@ func (e *Engine) rollback(prev string, failed model.Connection) {
 // error (surfaced to the UI so the user learns WHY activation failed).
 func (e *Engine) verifyActive(c model.Connection) (bool, string) {
 	timeout := time.Duration(e.rollbackTimeout()) * time.Second
-	if timeout <= 0 {
-		timeout = 90 * time.Second
-	}
 	deadline := time.Now().Add(timeout)
 	target := e.probeTarget()
 	const per = 6 * time.Second
@@ -366,7 +363,34 @@ func (e *Engine) probeTarget() string {
 	return "https://www.gstatic.com/generate_204"
 }
 
-func (e *Engine) rollbackTimeout() int { return e.store.Settings().RollbackTimeoutS }
+// Rollback-timeout bounds. The stored setting is a user-facing knob that may be
+// left at its zero value; we interpret it explicitly rather than letting a 0
+// silently mean "90s" somewhere downstream:
+//   - 0 (or negative) => defaultRollbackTimeoutS — the documented default;
+//   - a positive value below minRollbackTimeoutS is clamped up, so a fat-finger
+//     like "3" can't trip a rollback before even one end-to-end probe finishes
+//     (verifyActive runs a ~6s probe + 2s backoff per attempt).
+const (
+	defaultRollbackTimeoutS = 90
+	minRollbackTimeoutS     = 10
+)
+
+// normalizeRollbackTimeout maps the stored rollback_timeout_s to the effective
+// number of seconds verifyActive waits before giving up and rolling back. Pure
+// (no engine state) so it is unit-tested directly.
+func normalizeRollbackTimeout(stored int) int {
+	if stored <= 0 {
+		return defaultRollbackTimeoutS
+	}
+	if stored < minRollbackTimeoutS {
+		return minRollbackTimeoutS
+	}
+	return stored
+}
+
+func (e *Engine) rollbackTimeout() int {
+	return normalizeRollbackTimeout(e.store.Settings().RollbackTimeoutS)
+}
 
 func (e *Engine) baseCtx() context.Context {
 	if e.ctx != nil {

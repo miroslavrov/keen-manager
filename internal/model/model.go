@@ -260,6 +260,10 @@ type Settings struct {
 	PasswordHash     string `json:"-"`
 	Theme            string `json:"theme"` // dark | light
 	BackupOnChange   bool   `json:"backup_on_change"`
+	// RollbackTimeoutS is how long a fresh activation is probed end-to-end before
+	// it is rolled back as failed. 0 means "use the built-in default" (see
+	// engine.normalizeRollbackTimeout); very small positive values are clamped up
+	// so a rollback can never fire before one probe attempt completes.
 	RollbackTimeoutS int    `json:"rollback_timeout_s"`
 	KillSwitchDefault bool  `json:"kill_switch_default"`
 	// AutoSelectIntervalMin: how often to re-evaluate best location (0 = manual).
