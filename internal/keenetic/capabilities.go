@@ -35,6 +35,21 @@ type Capabilities struct {
 	// Routes/"Маршруты" feature. This landed with KeeneticOS 5.x, so it is
 	// gated on a 5.0+ release.
 	SupportsDNSRoute bool
+
+	// HasProxyClient reports whether the "Proxy client" system component is
+	// installed — the firmware feature (KeeneticOS 3.9+) that lets a proxy
+	// server (HTTP/HTTPS/SOCKS5) be added as a first-class connection of
+	// interface type "Proxy". keen-manager uses it to expose Xray as a single
+	// visible Proxy connection (→ its local SOCKS inbound) instead of the
+	// invisible TPROXY capture.
+	//
+	// Detection is best-effort from the component list (a component whose name
+	// contains "proxy"). It is a HINT only: the authoritative gate is whether
+	// the router accepts the create — the engine attempts proxy mode when this
+	// is true and falls back to TPROXY if the RCI write is rejected. Component
+	// naming varies across firmware, so do not treat a false here as definitive
+	// without an on-device read-back.
+	HasProxyClient bool
 }
 
 // versionResponse is the subset of "GET /show/version" fields we care about.
@@ -79,10 +94,15 @@ func DetectCapabilities(ctx context.Context, c *Client) (Capabilities, error) {
 	components := splitComponents(componentsRaw)
 
 	hasWireguard := false
+	hasProxyClient := false
 	for _, comp := range components {
 		if strings.EqualFold(comp, "wireguard") {
 			hasWireguard = true
-			break
+		}
+		// The Proxy client component's NDMS id varies across firmware; match any
+		// component whose name mentions "proxy" (best-effort — see HasProxyClient).
+		if strings.Contains(strings.ToLower(comp), "proxy") {
+			hasProxyClient = true
 		}
 	}
 
@@ -92,6 +112,7 @@ func DetectCapabilities(ctx context.Context, c *Client) (Capabilities, error) {
 		SupportsAWG2:     isAtLeast501A3(release),
 		HasWireguard:     hasWireguard,
 		SupportsDNSRoute: isAtLeast5(release),
+		HasProxyClient:   hasProxyClient,
 	}, nil
 }
 

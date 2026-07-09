@@ -39,9 +39,14 @@ type InterfaceInfo struct {
 	// Priority is the connection-priority NDMS assigns for default-route
 	// selection (0 when not reported).
 	Priority int
-	// IsWireguard is true for native WireGuard/AmneziaWG interfaces — the only
-	// interfaces that can back a dns-proxy route (a Routes target).
+	// IsWireguard is true for native WireGuard/AmneziaWG interfaces — one of the
+	// interface kinds that can back a dns-proxy route (a Routes target).
 	IsWireguard bool
+	// IsProxy is true for KeeneticOS "Proxy" interfaces (the Proxy client
+	// component's HTTP/HTTPS/SOCKS5 connections). keen-manager registers one of
+	// these to expose Xray as a single visible connection; like WireGuard
+	// interfaces they can back a dns-proxy route.
+	IsProxy bool
 }
 
 // ifaceWire mirrors the per-entry object of "GET /show/interface/". The field
@@ -106,6 +111,7 @@ func ListInterfaces(ctx context.Context, c *Client) ([]InterfaceInfo, error) {
 			SecurityLevel: w.SecurityLevel,
 			Priority:      w.Priority,
 			IsWireguard:   strings.EqualFold(strings.TrimSpace(w.Type), "Wireguard"),
+			IsProxy:       strings.EqualFold(strings.TrimSpace(w.Type), "Proxy"),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
