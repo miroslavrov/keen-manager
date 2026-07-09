@@ -1,6 +1,6 @@
 # Handoff — keen-manager (для следующего агента)
 
-Обновлено: 2026-07-10 (**13-я сессия**). Репозиторий: `github.com/miroslavrov/keen-manager`,
+Обновлено: 2026-07-10 (**14-я сессия**). Репозиторий: `github.com/miroslavrov/keen-manager`,
 ветка `main`. Коммиты от лица **miroslavrov** (git-credentials уже в песочнице; токен
 пользователь передаёт отдельно, в репозиторий НЕ коммитить). Пользователь на **KeeneticOS**
 (прошивка отдаёт release-строку `"5.01.C.0.0-1"`, это 5.1.0), arch **arm64**, тестирует
@@ -11,7 +11,73 @@
 
 ---
 
-## 0. Сессии 5–13 — что сделано и что осталось
+## 0. Сессии 5–14 — что сделано и что осталось
+
+### 14-я сессия (ДИАГНОСТИКА; код НЕ меняли, кроме diag-скрипта) — P0 «туннель не несёт трафик» ЛОКАЛИЗОВАН: reality-хендшейк ВСТАЁТ, но полезные данные не идут (НЕ роутинг / НЕ mark / НЕ параметры)
+Юзер прислал ещё on-device read-back'и (включая СОБСТВЕННЫЙ лог Xray). Задача: понять
+ПОЧЕМУ туннель не несёт трафик, код пока не трогать. Причина сужена до **канала данных
+reality**, НЕ роутинг/хайджек/параметры. Кода не меняли (кроме нового diag-скрипта).
+
+**Активный сервер (config.json, из blanc):** `109.163.239.98:443`, vless, **reality +
+flow `xtls-rprx-vision`**, network tcp, SNI `cdn3-87.yahoo.com`, fp firefox,
+pbk `CMkW1axrhEXoiJ6anMz9XEjlfqlAtEZya7L0b5ZPMyw`, sid `7e77e7e2cf2b7a79`
+(в старой тест-фикстуре `parse_test.go` был `07ddc43269d197c0` — сервер РОТИРОВАЛ sid,
+keen-manager подтянул новый корректно), uuid `839d4028-…`. Адрес — **IP** (DNS вне цепочки отказа).
+
+**Что ИСКЛЮЧЕНО (доказательно, on-device):**
+- **SO_MARK 255 (0xff)** — НЕ виновен. `ip rule show`: Keenetic-марки `0xffffa00`/`0xffffaaa`,
+  правила под `0xff` НЕТ → egress с mark 255 уходит в main table → WAN штатно. Коллизии нет.
+- **DPI по SNI** — НЕ режется. Прямой TLS1.3 к `cdn3-87.yahoo.com`@`109.163.239.98:443`
+  с устройства → полный хендшейк + **HTTP/2 200** (reality-cover цела, сервер доступен, TCP 0.07s).
+- **Порча параметров keen-manager'ом** — НЕТ. `7e77…` нигде не захардкожен; генерации sid нет;
+  pbk/sid идут `parse → vault → outbound.go` дословно (проверено grep'ом по internal/).
+- **DNS / петля / global-хайджек** — Proxy0 `connected:no` (рулит TPROXY), `global:false` держится,
+  адрес сервера IP; как причина мёртвого туннеля не воспроизводится.
+
+**КЛЮЧЕВАЯ УЛИКА — лог `/opt/var/log/xray.log` (loglevel warning) в момент сбоя:** десятки строк
+`from 192.168.1.x accepted tcp:<google/telegram/...>:443 [tproxy-in -> srv-conn-…]` и **НИ ОДНОЙ**
+ошибки reality/TLS/reset. Т.е. на устройстве reality **НЕ** падает в `received real certificate`
+/ `processed invalid connection`. Соединения принимаются и роутятся в серверный outbound без
+ошибок — но наружу трафик не идёт (сайты стоят, `curl -x socks5h://127.0.0.1:10808` пуст,
+проба к `gstatic/generate_204` — timeout).
+
+**ДИАГНОЗ (ведущая гипотеза):** reality-туннель **устанавливается**, но **полезная нагрузка не
+проходит**. Подпись **DPI (ТСПУ) душит vless-reality-VISION (TLS-in-TLS)** на этом ISP: хендшейк
+(выглядит как обычный TLS к yahoo) пропускается, а данные vision-потока throttl-ятся в ноль →
+xray НЕ видит ошибки, LAN висит. Альтернатива — серверная (сервер принимает хендшейк, но не
+проксирует). Точно НЕ роутинг/mark/DNS/params.
+
+**⚠️ УРОКИ ПО ИНСТРУМЕНТАМ (не наступать снова):**
+- **Песочница делает MITM TLS** (сертификаты `CN=whoami-sandbox-ca`) → **reality в песочнице
+  проверить НЕЛЬЗЯ**: локальная репродукция `received real certificate` — артефакт MITM,
+  невалидна (on-device лог её опроверг). Reality тестировать ТОЛЬКО на устройстве.
+- Роутер busybox: **нет `timeout`**; **jq БЕЗ ONIGURUMA** (нет `test()/match()` — только
+  `select(.protocol=="vless" or …)`); многострочная вставка в ash **рассыпается**. →
+  Диагностику давать ТОЛЬКО скриптом в репо, запуск одной строкой
+  `curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/<commit>/scripts/<x>.sh | sh`
+  (raw.githubusercontent работает; GitHub-РЕЛИЗЫ у юзера часто `curl (35) reset`/`(28) timeout`).
+- Добавлен **`scripts/diag-tunnel.sh`** (standalone-xray nomark/mark + TLS/DPI-проба + endpoint TCP;
+  read-only, сервис/iptables/маршруты не трогает).
+
+**ПРИОРИТЕТЫ СЛЕДУЮЩЕМУ АГЕНТУ:**
+1. **Развести DPI-vs-сервер (1 вопрос юзеру):** подключается ли blanc в приложении на ТЕЛЕФОНЕ
+   юзера в ТОЙ ЖЕ сети прямо сейчас? Да → не общий DPI/сервер, копать keen-manager-специфику
+   (MTU/фрагментация/sockopt/vision). Нет → сервер/DPI, keen-manager ни при чём (нужна свежая
+   подписка / другой узел).
+2. **Транспорт:** взять из blanc узел на **ws** (не reality-tcp-vision) либо reality без `flow`;
+   сравнить, несёт ли трафик. Подписка «reality+ws» — ws-узлы могут проходить ТСПУ.
+3. **КОД (наивысшая ценность):** сейчас keen-manager на провале пишет только «the tunnel did not
+   carry traffic (context deadline exceeded)». Надо **захватывать собственный лог/stderr Xray и
+   вставлять причину в ошибку активации** (+ debug-тумблер логлевела Xray). Это бы сэкономило всю
+   14-ю сессию. Файлы: `internal/xray/config.go` (`Log.Error` → файл + опция loglevel),
+   `internal/xray/control.go` (читать хвост лога), `internal/engine/apply.go` (`verifyActive` —
+   добавить xray-reason в текст ошибки).
+4. **Свежие device-логи Xray:** остановить сервис (`S99keen-manager stop`), выставить loglevel
+   debug, `xray run -confdir …` в форграунде, `curl -x socks5h://127.0.0.1:10808`, читать.
+   (`S99xray restart` при engine-запущенном xray может не переподхватиться — pidfile/pkill рассинхрон:
+   в этой сессии restart НЕ дописал свежих строк, лог был от прошлого сбойного прогона.)
+5. Если DPI-по-vision подтвердится — гнать vision-данные через обход (nfqws/tpws, P1) либо
+   предпочитать non-vision/ws-узлы.
 
 ### 13-я сессия (В РАБОТЕ) — Proxy0-хайджек починен (код в main); НО 3-й прогон вскрыл: активен TPROXY и туннель НЕ несёт трафик (новый P0 — см. подраздел «3-й прогон» ниже)
 Юзер прислал **on-device read-back** (то, чего ждали все сессии с 8-й — облачная
