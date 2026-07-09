@@ -125,6 +125,44 @@ func (i InterfaceInfo) IsBuiltInVPNServer() bool {
 	return strings.EqualFold(strings.TrimSpace(i.Description), builtInVPNServerDescription)
 }
 
+// PickWANInterface chooses the most likely ISP/WAN uplink from a set of router
+// interfaces, for seeding nfqws2's ISP_INTERFACE. It considers only public
+// (WAN-facing), non-tunnel interfaces — excluding WireGuard/Proxy tunnels and
+// the router's own bundled VPN server — and prefers ones that are connected and
+// up, then higher NDMS connection-priority, then name (for a deterministic
+// choice). Returns the winner and true, or false when nothing WAN-like is
+// present. Pure and order-stable, so the heuristic is unit-tested without a
+// device; the caller should still treat the result as validate-on-device.
+func PickWANInterface(ifaces []InterfaceInfo) (InterfaceInfo, bool) {
+	var cands []InterfaceInfo
+	for _, in := range ifaces {
+		if !strings.EqualFold(strings.TrimSpace(in.SecurityLevel), "public") {
+			continue
+		}
+		if in.IsWireguard || in.IsProxy || in.IsBuiltInVPNServer() {
+			continue
+		}
+		cands = append(cands, in)
+	}
+	if len(cands) == 0 {
+		return InterfaceInfo{}, false
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		a, b := cands[i], cands[j]
+		if a.Connected != b.Connected {
+			return a.Connected // connected first
+		}
+		if a.Up != b.Up {
+			return a.Up // up first
+		}
+		if a.Priority != b.Priority {
+			return a.Priority > b.Priority // higher NDMS priority first
+		}
+		return a.Name < b.Name
+	})
+	return cands[0], true
+}
+
 // ifaceStateUp normalises the several "is it up?" words NDMS uses across its
 // state/link/connected fields ("up", "running", "connected", "yes") to a bool.
 // "pending"/"disabled"/"down"/"" all read as not-up (per NDMS's layer-state

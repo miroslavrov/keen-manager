@@ -185,6 +185,9 @@ type StateView struct {
 	Failover           model.Failover        `json:"failover"`
 	Wan                WanView               `json:"wan"`
 	KillSwitch         bool                  `json:"kill_switch"`
+	// HookInstalled reports whether the ndm netfilter.d hook that reapplies
+	// transparent-proxy rules after a topology change is present on the router.
+	HookInstalled bool `json:"hook_installed"`
 }
 
 // RouteView is one configured service route (Routes / "Маршруты").

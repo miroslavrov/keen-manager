@@ -261,6 +261,7 @@ func (e *Engine) State() StateView {
 		Failover:           fo,
 		Wan:                e.detectWAN(),
 		KillSwitch:         st.KillSwitch,
+		HookInstalled:      e.HookInstalled(),
 	}
 }
 

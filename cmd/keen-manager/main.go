@@ -97,6 +97,8 @@ COMMANDS:
   nfqws set <field> <value>    set one structured nfqws2.conf field
                                (fields: ports, policy, strategy args, …;
                                run without args to list them)
+  nfqws set isp-interface auto autodetect + set the WAN uplink interface
+  nfqws detect-isp             print the autodetected WAN uplink (no write)
   passwd <new-password>        set the web UI password and enable auth
   auth disable                 turn off the web UI login (recover from a lockout)
   auth status                  show whether the web UI login is enabled
@@ -110,6 +112,7 @@ COMMANDS:
   failover autoreturn <on|off> return to a higher-priority node when it recovers
   failover probe <url>         set the end-to-end connectivity probe target
   route reapply                re-install transparent-proxy rules (ndm hook)
+  route status                 report whether the ndm netfilter hook is wired
   install-hook                 install the ndm netfilter.d hook (done by installer)
   uninstall-hook               remove the ndm netfilter.d hook
   version                      print the version
@@ -271,33 +274,57 @@ func cmdNfqws(args []string) {
 			fatal("read nfqws2.conf: %v", err)
 		}
 		printJSON(v)
+	case "detect-isp":
+		dev, src, err := eng.DetectISPInterface()
+		if err != nil {
+			fatal("%v", err)
+		}
+		printJSON(map[string]string{"interface": dev, "source": src})
 	case "set":
 		if len(args) < 3 {
 			fatal("usage: keen-manager nfqws set <field> <value>\nfields:\n%s", nfqws.ConfFieldHelp())
 		}
+		field := strings.ToLower(args[1])
 		// Join the tail so an unquoted multi-word strategy still arrives whole.
-		key, val, err := nfqws.ParseConfField(args[1], strings.Join(args[2:], " "))
+		value := strings.Join(args[2:], " ")
+		// `set isp-interface auto` resolves the WAN uplink on-device.
+		if field == "isp-interface" && strings.EqualFold(strings.TrimSpace(value), "auto") {
+			dev, src, err := eng.DetectISPInterface()
+			if err != nil {
+				fatal("%v", err)
+			}
+			value = dev
+			fmt.Printf("autodetected ISP interface: %s (via %s)\n", dev, src)
+		}
+		key, val, err := nfqws.ParseConfField(field, value)
 		if err != nil {
 			fatal("%v", err)
 		}
 		if err := eng.SaveNfqwsConfigStructured(map[string]any{key: val}); err != nil {
 			fatal("%v", err)
 		}
-		fmt.Printf("nfqws2 %s set to %v\n", strings.ToLower(args[1]), val)
+		fmt.Printf("nfqws2 %s set to %v\n", field, val)
 	default:
 		fatal("unknown nfqws subcommand %q", args[0])
 	}
 }
 
 func cmdRoute(args []string) {
-	if len(args) == 0 || args[0] != "reapply" {
-		fatal("usage: keen-manager route reapply")
+	if len(args) == 0 {
+		fatal("usage: keen-manager route reapply|status")
 	}
 	eng := openEngine()
-	if err := eng.ReapplyRoutes(); err != nil {
-		fatal("%v", err)
+	switch args[0] {
+	case "reapply":
+		if err := eng.ReapplyRoutes(); err != nil {
+			fatal("%v", err)
+		}
+		fmt.Println("routes reapplied")
+	case "status":
+		printJSON(eng.HookStatus())
+	default:
+		fatal("usage: keen-manager route reapply|status")
 	}
-	fmt.Println("routes reapplied")
 }
 
 func cmdFailover(args []string) {
