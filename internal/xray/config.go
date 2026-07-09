@@ -116,6 +116,17 @@ type Options struct {
 	// tunnel — all captured traffic goes through the server.
 	SplitDomains []string
 	SplitSubnets []string
+
+	// ProxyConnMode builds the minimal SOCKS-only profile used when Xray is
+	// wired to the router as a single KeeneticOS "Proxy connection" (interface
+	// type Proxy → 127.0.0.1:<SocksPort>) rather than captured via TPROXY. In
+	// this mode the config is just: the local SOCKS inbound + the single active
+	// server outbound (+ direct/block). There is NO tproxy inbound, NO
+	// observatory/balancer, and NO in-Xray split routing — per-service selection
+	// is done by the router's own dns-proxy route bound to the Proxy interface
+	// (exactly like native AWG), so a full tunnel here is correct. EnableTProxy,
+	// EnableBalancer and Split* are all ignored when ProxyConnMode is set.
+	ProxyConnMode bool
 }
 
 // Defaults returns sane default options.
@@ -141,6 +152,13 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 	}
 	if opts.SocksPort == 0 {
 		opts = mergeDefaults(opts)
+	}
+
+	// Proxy-connection mode: emit the minimal SOCKS-only profile (see
+	// Options.ProxyConnMode). The router owns routing via a dns-proxy route on
+	// the Proxy interface, so we neither capture nor split here.
+	if opts.ProxyConnMode {
+		return buildProxyConnConfig(servers[0], opts)
 	}
 
 	// The balancer (and its observatory) only exist with more than one server.
@@ -265,6 +283,45 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 		}
 	}
 
+	return cfg, nil
+}
+
+// buildProxyConnConfig produces the minimal SOCKS-only config for
+// proxy-connection mode (Options.ProxyConnMode): a single local SOCKS inbound
+// forwarding a single pinned server outbound, plus direct/block. No tproxy
+// inbound, no api/stats/observatory and no split rules — the router routes to
+// the Proxy interface, and switching server just rewrites this file under the
+// hood while the KeeneticOS Proxy interface stays put.
+func buildProxyConnConfig(server model.Server, opts Options) (*Config, error) {
+	tag := opts.TagPrefix + server.ID
+	ob, err := OutboundFor(server, tag)
+	if err != nil {
+		return nil, fmt.Errorf("server %s: %w", server.Name, err)
+	}
+
+	socksSettings, _ := json.Marshal(map[string]any{"auth": "noauth", "udp": true})
+	cfg := &Config{
+		Log: &Log{Loglevel: def(opts.LogLevel, "warning")},
+		Inbounds: []Inbound{{
+			Tag:      "socks-in",
+			Listen:   "127.0.0.1",
+			Port:     opts.SocksPort,
+			Protocol: "socks",
+			Settings: socksSettings,
+			Sniffing: &Sniffing{Enabled: true, DestOverride: []string{"http", "tls", "quic"}, RouteOnly: true},
+		}},
+		Outbounds: []Outbound{
+			*ob,
+			{Tag: "direct", Protocol: "freedom"},
+			{Tag: "block", Protocol: "blackhole"},
+		},
+		Routing: &Routing{
+			DomainStrategy: "IPIfNonMatch",
+			Rules: []Rule{
+				{Type: "field", InboundTag: []string{"socks-in"}, OutboundTag: tag},
+			},
+		},
+	}
 	return cfg, nil
 }
 

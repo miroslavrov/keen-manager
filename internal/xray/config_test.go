@@ -166,6 +166,59 @@ func TestBuildConfigFullTunnelHasNoDirectCatchAll(t *testing.T) {
 	}
 }
 
+// TestBuildConfigProxyConnMode covers the SOCKS-only profile used when Xray is
+// wired as a single KeeneticOS Proxy connection: exactly one SOCKS inbound (no
+// tproxy dokodemo-door), the single server pinned, no observatory/balancer, no
+// api block (so it can never hit "not all dependencies are resolved"), and no
+// split/direct catch-all even when Split* would otherwise apply.
+func TestBuildConfigProxyConnMode(t *testing.T) {
+	opts := Defaults()
+	opts.ProxyConnMode = true
+	opts.EnableTProxy = true // must be ignored in proxy-conn mode
+	opts.EnableBalancer = true
+	opts.SplitDomains = []string{"youtube.com"} // must be ignored (router routes instead)
+	cfg, err := BuildConfig([]model.Server{sampleReality("a", "1.1.1.1")}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Inbounds) != 1 {
+		t.Fatalf("proxy-conn config must have exactly one inbound, got %d", len(cfg.Inbounds))
+	}
+	in := cfg.Inbounds[0]
+	if in.Protocol != "socks" || in.Listen != "127.0.0.1" || in.Port != opts.SocksPort {
+		t.Errorf("expected a loopback socks inbound on %d, got %+v", opts.SocksPort, in)
+	}
+	for _, in := range cfg.Inbounds {
+		if in.Protocol == "dokodemo-door" {
+			t.Error("proxy-conn config must not carry a tproxy inbound")
+		}
+	}
+	if cfg.API != nil || cfg.Stats != nil {
+		t.Error("proxy-conn config should omit the api/stats block entirely")
+	}
+	if cfg.Observatory != nil || cfg.BurstObservatory != nil {
+		t.Error("proxy-conn config must not carry an observatory")
+	}
+	if len(cfg.Outbounds) != 3 { // server + direct + block
+		t.Errorf("outbounds = %d, want 3 (server+direct+block)", len(cfg.Outbounds))
+	}
+	if cfg.Outbounds[0].Tag != "srv-a" {
+		t.Errorf("first outbound should be the pinned server srv-a, got %q", cfg.Outbounds[0].Tag)
+	}
+	if len(cfg.Routing.Rules) != 1 || cfg.Routing.Rules[0].OutboundTag != "srv-a" {
+		t.Errorf("expected a single socks-in→srv-a rule, got %+v", cfg.Routing.Rules)
+	}
+	for _, r := range cfg.Routing.Rules {
+		if r.OutboundTag == "direct" {
+			t.Error("proxy-conn mode routes at the router, so no in-Xray direct catch-all")
+		}
+	}
+	if _, err := Marshal(cfg); err != nil {
+		t.Fatalf("proxy-conn config must marshal: %v", err)
+	}
+}
+
 func TestBuildConfigSinglePin(t *testing.T) {
 	cfg, err := BuildConfig([]model.Server{sampleReality("a", "1.1.1.1")}, Defaults())
 	if err != nil {
