@@ -53,6 +53,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/nfqws/action", s.requireAuth(s.handleNfqwsAction))
 	mux.HandleFunc("GET /api/nfqws/config", s.requireAuth(s.handleNfqwsConfig))
 	mux.HandleFunc("PUT /api/nfqws/config", s.requireAuth(s.handleSaveNfqwsConfig))
+	mux.HandleFunc("GET /api/nfqws/config/structured", s.requireAuth(s.handleNfqwsConfigStructured))
+	mux.HandleFunc("PUT /api/nfqws/config/structured", s.requireAuth(s.handleSaveNfqwsConfigStructured))
 	mux.HandleFunc("GET /api/nfqws/lists", s.requireAuth(s.handleNfqwsLists))
 	mux.HandleFunc("GET /api/nfqws/lists/{name}", s.requireAuth(s.handleNfqwsList))
 	mux.HandleFunc("PUT /api/nfqws/lists/{name}", s.requireAuth(s.handleSaveNfqwsList))
@@ -318,6 +320,28 @@ func (s *Server) handleSaveNfqwsConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.eng.SaveNfqwsConfig(body.Raw, body.Mode); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeOK(w)
+}
+
+func (s *Server) handleNfqwsConfigStructured(w http.ResponseWriter, r *http.Request) {
+	v, err := s.eng.NfqwsConfigStructured()
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) handleSaveNfqwsConfigStructured(w http.ResponseWriter, r *http.Request) {
+	var fields map[string]any
+	if err := readJSON(r, &fields); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := s.eng.SaveNfqwsConfigStructured(fields); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}

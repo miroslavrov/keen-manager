@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/miroslavrov/keen-manager/internal/health"
 	"github.com/miroslavrov/keen-manager/internal/model"
+	"github.com/miroslavrov/keen-manager/internal/nfqws"
 )
 
 // Nfqws returns the nfqws2 service status.
@@ -64,6 +66,53 @@ func (e *Engine) SaveNfqwsConfig(raw string, mode model.NfqwsMode) error {
 		_ = e.nfqws.Reload()
 	}
 	e.Logf("nfqws2 config saved (mode=%s)", mode)
+	e.publishState()
+	return nil
+}
+
+// NfqwsConfigStructured returns nfqws2.conf parsed into typed fields for the
+// form editor (ports, interface, policy, mode, strategy blocks, …).
+func (e *Engine) NfqwsConfigStructured() (nfqws.Conf, error) {
+	return e.nfqws.Conf()
+}
+
+// SaveNfqwsConfigStructured merges a partial set of typed fields over the
+// current nfqws2.conf and writes it back with lossless round-trip (only changed
+// keys are rewritten; comments, ordering and untouched multiline strategy
+// blocks are preserved byte-for-byte), then reloads the service if running.
+func (e *Engine) SaveNfqwsConfigStructured(fields map[string]any) error {
+	cur, err := e.nfqws.Conf()
+	if err != nil {
+		return err
+	}
+	// Overlay the incoming fields onto the current typed config via JSON so the
+	// caller can send only the keys they changed.
+	base, err := json.Marshal(cur)
+	if err != nil {
+		return err
+	}
+	var merged map[string]any
+	if err := json.Unmarshal(base, &merged); err != nil {
+		return err
+	}
+	for k, v := range fields {
+		merged[k] = v
+	}
+	mb, err := json.Marshal(merged)
+	if err != nil {
+		return err
+	}
+	var updated nfqws.Conf
+	if err := json.Unmarshal(mb, &updated); err != nil {
+		return fmt.Errorf("invalid nfqws config fields: %w", err)
+	}
+	if err := e.nfqws.SaveConf(updated); err != nil {
+		return err
+	}
+	if e.nfqws.Running() {
+		_ = e.nfqws.Reload()
+	}
+	e.Logf("nfqws2 structured config saved")
 	e.publishState()
 	return nil
 }

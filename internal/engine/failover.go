@@ -77,7 +77,12 @@ func (e *Engine) failoverTick() {
 	}
 	st := e.store.Get()
 	fo := st.Failover
-	if !fo.Enabled || len(fo.Chain) == 0 {
+	if !fo.Enabled {
+		return
+	}
+	// There must be somewhere to fail over to: either a global chain or the
+	// active connection's own per-connection fallback target.
+	if len(fo.Chain) == 0 && !e.activeHasFallback(st) {
 		return
 	}
 
@@ -134,7 +139,48 @@ func (e *Engine) failToNext(st model.State, reason string) {
 			return
 		}
 	}
+
+	// Global chain exhausted (or empty): honour the failed connection's own
+	// per-connection fallback target (VPN → other VPN → AWG → direct), so a
+	// user can pin a specific safety net per connection without maintaining the
+	// global chain.
+	if e.failToConnFallback(from, reason) {
+		return
+	}
 	e.Logf("failover: no reachable node after current; leaving as-is")
+}
+
+// activeHasFallback reports whether the active connection defines a
+// per-connection fallback target.
+func (e *Engine) activeHasFallback(st model.State) bool {
+	c, ok := findConn(st, st.ActiveConnID)
+	return ok && c.FallbackTo != ""
+}
+
+// failToConnFallback attempts the per-connection fallback target of connection
+// `from`. Returns true when it switched (or went direct), false when there is
+// no usable per-connection fallback.
+func (e *Engine) failToConnFallback(from, reason string) bool {
+	if from == "" {
+		return false
+	}
+	c, ok := findConn(e.store.Get(), from)
+	if !ok || c.FallbackTo == "" || c.FallbackTo == from {
+		return false
+	}
+	if c.FallbackTo == DirectNode {
+		e.goDirect(from, "per-connection fallback — "+reason)
+		e.foResetFail()
+		return true
+	}
+	if e.nodeReachable(c.FallbackTo) {
+		if err := e.Activate(c.FallbackTo); err == nil {
+			e.recordFailover(from, c.FallbackTo, "per-connection fallback — "+reason)
+			e.foResetFail()
+			return true
+		}
+	}
+	return false
 }
 
 // maybeAutoReturn switches back to the earliest healthy node in the chain when
