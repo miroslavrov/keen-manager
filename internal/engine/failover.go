@@ -217,7 +217,7 @@ func (e *Engine) failToNext(st model.State, reason string) bool {
 			return true
 		}
 		if e.nodeReachable(node) {
-			if err := e.Activate(node); err != nil {
+			if err := e.activateWithin(node); err != nil {
 				e.Logf("failover: activating %s failed: %v", node, err)
 				continue
 			}
@@ -263,7 +263,7 @@ func (e *Engine) failToConnFallback(from, reason string) bool {
 		return true
 	}
 	if e.nodeReachable(c.FallbackTo) {
-		if err := e.Activate(c.FallbackTo); err == nil {
+		if err := e.activateWithin(c.FallbackTo); err == nil {
 			e.recordFailover(from, c.FallbackTo, "per-connection fallback — "+reason)
 			e.foResetFail()
 			return true
@@ -286,7 +286,7 @@ func (e *Engine) maybeAutoReturn(st model.State) {
 			continue
 		}
 		if e.nodeReachable(node) {
-			if err := e.Activate(node); err != nil {
+			if err := e.activateWithin(node); err != nil {
 				continue
 			}
 			e.recordFailover(st.ActiveConnID, node, "higher-priority node recovered — auto-return")
@@ -393,7 +393,7 @@ func (e *Engine) nfqwsGuardTick(st model.State) bool {
 		e.Logf("nfqws guard: fallback %s not reachable", target)
 		return false
 	}
-	if err := e.Activate(target); err != nil {
+	if err := e.activateWithin(target); err != nil {
 		e.Logf("nfqws guard: activating %s failed: %v", target, err)
 		return false
 	}

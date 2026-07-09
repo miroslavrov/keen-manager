@@ -134,7 +134,7 @@ func (e *Engine) autoSelectTick() {
 		return
 	}
 	e.Logf("auto-select: migrating to faster server in %s", sub.Name)
-	if err := e.Activate(best); err != nil {
+	if err := e.activateWithin(best); err != nil {
 		e.Logf("auto-select activate failed: %v", err)
 		return
 	}

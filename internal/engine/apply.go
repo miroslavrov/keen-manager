@@ -28,7 +28,16 @@ import (
 // are skipped (there is nothing real to probe).
 
 // Activate makes a connection the active default path, with automatic rollback.
-func (e *Engine) Activate(id string) error {
+// It runs unbounded — the caller waits — so it is the right entry point for
+// user-initiated activations (HTTP/CLI).
+func (e *Engine) Activate(id string) error { return e.activate(e.baseCtx(), id) }
+
+// activate is Activate with an explicit context. Background callers on the
+// shared health/failover goroutine use activateWithin to pass a per-attempt
+// deadline so one hung bring-up can't stall the loop; the long-running steps
+// (xray-core download and the post-activate verify) observe ctx and bail when
+// it fires.
+func (e *Engine) activate(ctx context.Context, id string) error {
 	st := e.store.Get()
 	c, ok := findConn(st, id)
 	if !ok {
@@ -40,7 +49,7 @@ func (e *Engine) Activate(id string) error {
 	prev := st.ActiveConnID
 	e.Logf("activating %s (previous active: %q)", c.Name, prev)
 
-	if err := e.bringUp(c); err != nil {
+	if err := e.bringUpCtx(ctx, c); err != nil {
 		return fmt.Errorf("bring up %s: %w", c.Name, err)
 	}
 	if err := e.setActive(id); err != nil {
@@ -54,7 +63,7 @@ func (e *Engine) Activate(id string) error {
 
 	// Verify + rollback deadman (skipped in dry-run: nothing real to probe).
 	if !e.runner.DryRun {
-		if ok, detail := e.verifyActive(c); !ok {
+		if ok, detail := e.verifyActive(ctx, c); !ok {
 			target := e.probeTarget()
 			reason := firstNonEmpty(detail, "no response before the rollback timeout")
 			e.Logf("post-activate probe failed for %s (target=%s: %s) — rolling back to %q", c.Name, target, reason, prev)
@@ -135,7 +144,13 @@ func (e *Engine) markActiveXrayRoutesApplied(connID string) {
 }
 
 // bringUp starts a connection's underlying service without changing routing.
-func (e *Engine) bringUp(c model.Connection) error {
+// It runs unbounded (uses the engine's base context); background callers that
+// need a deadline go through activate → bringUpCtx.
+func (e *Engine) bringUp(c model.Connection) error { return e.bringUpCtx(e.baseCtx(), c) }
+
+// bringUpCtx is bringUp with an explicit context so a bounded activation can cap
+// the one step that can block for minutes — the first-run xray-core download.
+func (e *Engine) bringUpCtx(ctx context.Context, c model.Connection) error {
 	switch c.Type {
 	case model.ConnAWG:
 		if c.AWG == nil {
@@ -153,8 +168,9 @@ func (e *Engine) bringUp(c model.Connection) error {
 			return fmt.Errorf("server credentials missing from vault")
 		}
 		// Provision xray-core itself if missing (no-op when present / dry-run).
-		// The one-time download runs over the current WAN before we capture it.
-		ictx, icancel := context.WithTimeout(e.baseCtx(), 4*time.Minute)
+		// The one-time download runs over the current WAN before we capture it,
+		// bounded by the smaller of 4 minutes and the caller's deadline.
+		ictx, icancel := context.WithTimeout(ctx, 4*time.Minute)
 		err := e.xray.Ensure(ictx)
 		icancel()
 		if err != nil {
@@ -257,7 +273,7 @@ func (e *Engine) rollback(prev string, failed model.Connection) {
 // connection, retrying until the rollback timeout elapses. It returns whether
 // the path verified and, on failure, a short human detail of the last probe
 // error (surfaced to the UI so the user learns WHY activation failed).
-func (e *Engine) verifyActive(c model.Connection) (bool, string) {
+func (e *Engine) verifyActive(ctx context.Context, c model.Connection) (bool, string) {
 	timeout := time.Duration(e.rollbackTimeout()) * time.Second
 	deadline := time.Now().Add(timeout)
 	target := e.probeTarget()
@@ -265,6 +281,11 @@ func (e *Engine) verifyActive(c model.Connection) (bool, string) {
 
 	lastDetail := ""
 	for attempt := 1; time.Now().Before(deadline); attempt++ {
+		// Bail immediately if the caller's context (e.g. a bounded failover
+		// attempt) has been cancelled, so a hung activation can't pin the loop.
+		if err := ctx.Err(); err != nil {
+			return false, firstNonEmpty(lastDetail, "activation attempt timed out")
+		}
 		// Native AWG2: the authoritative signal is a recent peer handshake (a
 		// direct HTTP probe can pass over the WAN even when the tunnel is not
 		// yet the active route), so check it before falling back to HTTP.
@@ -275,17 +296,19 @@ func (e *Engine) verifyActive(c model.Connection) (bool, string) {
 					return true, ""
 				}
 				lastDetail = "no recent AmneziaWG peer handshake"
-				time.Sleep(2 * time.Second)
+				if !sleepCtx(ctx, 2*time.Second) {
+					return false, firstNonEmpty(lastDetail, "activation attempt timed out")
+				}
 				continue
 			}
 		}
-		ctx, cancel := context.WithTimeout(e.baseCtx(), per)
+		pctx, cancel := context.WithTimeout(ctx, per)
 		var p health.Probe
 		switch c.Type {
 		case model.ConnXray:
-			p = health.SOCKSHTTP(ctx, net.JoinHostPort(xraySocksHost, strconv.Itoa(xraySocksPort)), target, per)
+			p = health.SOCKSHTTP(pctx, net.JoinHostPort(xraySocksHost, strconv.Itoa(xraySocksPort)), target, per)
 		case model.ConnAWG:
-			p = health.DirectHTTP(ctx, target, per)
+			p = health.DirectHTTP(pctx, target, per)
 		}
 		cancel()
 		if p.OK {
@@ -295,9 +318,39 @@ func (e *Engine) verifyActive(c model.Connection) (bool, string) {
 		if p.Err != nil {
 			lastDetail = p.Err.Error()
 		}
-		time.Sleep(2 * time.Second)
+		if !sleepCtx(ctx, 2*time.Second) {
+			return false, firstNonEmpty(lastDetail, "activation attempt timed out")
+		}
 	}
 	return false, lastDetail
+}
+
+// foActivateMarginS is added on top of the rollback (verify) budget to bound a
+// single failover-initiated activation: enough headroom for the bring-up itself
+// on top of the verify loop, while still capping a genuinely stuck attempt.
+const foActivateMarginS = 45
+
+// activateWithin runs Activate with a bounded per-attempt timeout, so one hung
+// bring-up (a stuck xray-core fetch, or a server that never completes the
+// verify probe) can't stall the shared health/failover goroutine. Used by every
+// background (loop-driven) activation; interactive callers use Activate.
+func (e *Engine) activateWithin(id string) error {
+	timeout := time.Duration(e.rollbackTimeout()+foActivateMarginS) * time.Second
+	ctx, cancel := context.WithTimeout(e.baseCtx(), timeout)
+	defer cancel()
+	return e.activate(ctx, id)
+}
+
+// sleepCtx sleeps for d, returning false if ctx is cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 // setActive persists the active connection id.
