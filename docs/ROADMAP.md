@@ -16,6 +16,49 @@ AWG2).
 
 ---
 
+## Session 12 — CLI + failover quality + nfqws2 parity + dashboard polish
+
+Code-side polish toward stable (the router LAN is unreachable from the cloud
+sandbox, so all on-device P0/P1 validation still belongs to the user). All in
+`main`, green: `go build/vet/test` + mipsle/arm64 cross + web bundle (tsc +
+vitest 17), CI bundle guard passing.
+
+- [x] **Structured-nfqws CLI parity** (`feat(cli)` 3d7cb2e) — closes the last
+  CLI-parity gap. `keen-manager nfqws config` prints the structured
+  nfqws2.conf; `nfqws set <field> <value>` edits one typed field (tcp/udp
+  ports, policy, nfqueue, log-level, ipv6, and the strategy arg blocks) through
+  the same JSON overlay + lossless round-trip the web form uses. Pure
+  `ParseConfField`/`ConfFieldHelp`, unit-tested (incl. a reflection guard that
+  every field maps to a real Conf json tag).
+- [x] **Through-tunnel reachability in select-best** (`feat(engine)` 74b0fd6) —
+  the roadmap's "verify chain nodes end-to-end before selecting." SelectBest
+  now ranks reachable servers by latency and tries them best-first, verifying
+  each through the tunnel with Activate's verify-then-rollback deadman; the
+  first that carries traffic wins, so a fast-pinging DPI-dead server no longer
+  fails the whole action. Bounded (xray-core pre-ensured once, per-candidate
+  verify cap, ≤5 candidates); rolls back to the previous active on total
+  failure. Pure `rankByLatency` unit-tested. (The failover chain already did
+  this via `activateWithin`.)
+- [~] **nfqws2 parity — ISP-interface autodetect + ndm hook status**
+  (`feat(engine)` 01877d7). `DetectISPInterface` picks the WAN uplink from the
+  RCI interface listing (pure `PickWANInterface`: public, non-tunnel,
+  connected, priority), authoritative even when a VPN owns the default route;
+  `nfqws detect-isp` / `nfqws set isp-interface auto`. `HookStatus` reports the
+  ndm netfilter hook present/wired/binary-present (`route status` CLI +
+  `hook_installed` on `/api/state`). **Validate the chosen ISP interface
+  on-device.** nfqws2 lua/log file management + self-update/version check still
+  TODO.
+- [x] **Firmware capabilities + traffic API** (`feat(api)` 9e76753). GET
+  /api/health carries a capabilities block (native_awg2 / wireguard /
+  proxy_client / dns_route + firmware); new GET /api/traffic returns per-iface
+  rx/tx counters from /proc/net/dev (pure `parseProcNetDev`, unit-tested).
+- [~] **Dashboard polish** (`feat(web)` 7af8c28). A capabilities bar badges
+  native AWG2 / WireGuard / Proxy client / DNS routing / route hook; the WAN
+  card shows live Download/Upload throughput (diffs /api/traffic). EN+RU,
+  bundle rebuilt in-commit. **Quick connection switcher still TODO.**
+
+---
+
 ## Session 11 — release hardening (P2) + install fix + CLI parity
 
 - [x] **Installer resolves the newest release by SemVer** (`fix(install)`
@@ -354,11 +397,13 @@ validation items below.
   hanging bring-up can't stall the shared health goroutine. (session 11, efb9d4c)
 - [x] Backoff/jitter when the whole failover chain is down (stop hammering every
   server every tick). (session 11, aaeba95)
-- [ ] Through-tunnel reachability for chain nodes (not just TCP/handshake) before
-  selecting them.
-- [ ] nfqws2 parity: arbitrary list/lua/log file management, self-update /
-  version check, `ISP_INTERFACE` auto-detection, verify the ndm netfilter hook
-  is installed and fires.
+- [x] Through-tunnel reachability for chain nodes (not just TCP/handshake) before
+  selecting them. (session 12, 74b0fd6 — select-best; the failover chain already
+  verified via activateWithin.)
+- [~] nfqws2 parity: `ISP_INTERFACE` auto-detection + ndm netfilter hook status
+  landed (session 12, 01877d7). Still TODO: arbitrary list/lua/log file
+  management, self-update / version check, and confirming the hook actually
+  *fires* on-device (presence/wiring is now checked).
 - [ ] hysteria2 / tuic subscription protocols (model + Xray outbound) — not used
   by BlancVPN / 3x-ui today, so lower priority.
 - [x] Honour `RollbackTimeoutS == 0` explicitly (was silently 90s). (session 11, 7354bc8)
@@ -366,10 +411,10 @@ validation items below.
 
 ## P3 — polish / релиз
 
-- [ ] Dashboard: live traffic counters, quick connection switcher, native-AWG2
-  capability badge (firmware is already detected).
-- [~] CLI parity for structured nfqws config + failover editing. (failover done
-  session 11, 5d2ee2e; structured nfqws still TODO)
+- [~] Dashboard: live traffic counters + native-AWG2 capability badge landed
+  (session 12, 7af8c28). Quick connection switcher still TODO.
+- [x] CLI parity for structured nfqws config + failover editing. (failover
+  session 11, 5d2ee2e; structured nfqws session 12, 3d7cb2e)
 - [ ] Commit a freshly built embedded bundle for `go build`-from-source users
   (CI already rebuilds it on release).
 
