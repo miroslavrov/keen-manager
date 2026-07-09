@@ -202,15 +202,18 @@ func (e *Engine) bringDown(c model.Connection) error {
 func (e *Engine) applyRouting(c model.Connection) error {
 	switch c.Type {
 	case model.ConnXray:
-		if e.xrayProxyMode() {
-			// Native routing: traffic reaches the tunnel via a dns-proxy route on
-			// ProxyN (applied per-route), so there is nothing to capture here. Make
-			// the exit point eligible for the default route (best-effort) so it can
-			// also serve as a primary connection in a Keenetic policy.
-			e.markProxyGlobalBestEffort()
-		} else if err := e.route.EnableTProxy(); err != nil {
-			return err
+		if !e.xrayProxyMode() {
+			// TPROXY fallback: install the transparent-proxy capture.
+			if err := e.route.EnableTProxy(); err != nil {
+				return err
+			}
 		}
+		// proxy-connection mode: nothing to capture and nothing to make "default".
+		// The selected traffic reaches the tunnel via per-domain dns-proxy routes
+		// bound to ProxyN (applied per-route on the Routes page). ProxyN is
+		// deliberately NOT marked as the global/default internet connection — a
+		// SOCKS-proxy default loops the router's own DNS + Xray server-upstream
+		// back through the proxy (see ensureManagedProxyIface).
 	case model.ConnAWG:
 		// awg-quick installs routes from AllowedIPs; nothing extra to add.
 	}

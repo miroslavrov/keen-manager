@@ -123,20 +123,29 @@ func (e *Engine) ensureManagedProxyIface() (string, error) {
 	if err := keenetic.CreateProxyInterface(ctx, e.keenetic, name, cfg); err != nil {
 		return "", err
 	}
-	// Best-effort: make it eligible for connection-priority routing. Firmware
-	// variance in the "global" shape must not fail activation — the interface is
-	// up and can be prioritised from the Keenetic UI; the SOCKS probe decides
-	// success either way.
-	if err := keenetic.SetInterfaceGlobal(ctx, e.keenetic, name, true); err != nil {
-		e.Logf("proxy-conn: could not mark %s global (%v) — set its priority in the Keenetic UI if traffic does not route", name, err)
-	}
+	// IMPORTANT — do NOT mark ProxyN as a global/default internet connection
+	// ("ip global" / the "use for internet access" checkbox). A SOCKS-proxy
+	// interface is a per-domain routing TARGET, not a default route.
+	//
+	// Unlike a WireGuard kernel tunnel — whose server endpoint stays reachable
+	// over the WAN because NDMS pins an endpoint host-route — a proxy interface
+	// has no endpoint pinning. If ProxyN became the default, the router's OWN
+	// egress (UDP DNS resolution + Xray's TCP connection out to the vless server)
+	// would be sent into ProxyN → the local SOCKS 127.0.0.1:10808 → Xray → and,
+	// having no other default, straight back into ProxyN: a tight routing loop.
+	// SOCKS is also TCP-only, so UDP DNS through it dies outright. That is the
+	// "it storms / no site loads / without a policy it swallows all traffic"
+	// failure reported on-device. Traffic must reach the tunnel ONLY through
+	// explicit dns-proxy routes bound to ProxyN (the Routes page), exactly like
+	// AWG's per-service routes; the WAN stays the default so DNS and Xray's own
+	// upstream egress normally. See docs/XRAY-PROXY-PLAN.md §6 (routing loop).
 	if err := e.recordManagedProxyIface(name); err != nil {
 		e.Logf("proxy-conn: warning: could not persist managed proxy iface %s: %v", name, err)
 	}
 	if err := e.keenetic.Save(ctx); err != nil {
 		e.Logf("proxy-conn: warning: RCI save failed: %v", err)
 	}
-	e.Logf("proxy-conn: registered %s → SOCKS %s:%d (single Xray exit point, firmware %s)", name, xraySocksHost, xraySocksPort, e.caps.Release)
+	e.Logf("proxy-conn: registered %s → SOCKS %s:%d as a per-service routing target (route domains to it on the Routes page; it is deliberately NOT the default connection — that would loop the router's own DNS/Xray-upstream; firmware %s)", name, xraySocksHost, xraySocksPort, e.caps.Release)
 	return name, nil
 }
 
@@ -165,22 +174,6 @@ func (e *Engine) teardownManagedProxyIfaceIfUnused() {
 		}
 	}
 	e.clearManagedProxyIface()
-}
-
-// markProxyGlobalBestEffort marks the managed Proxy interface as a global
-// (internet-eligible) connection so it can serve as a default/primary route in
-// a Keenetic connection policy. Best-effort and off-device-safe.
-func (e *Engine) markProxyGlobalBestEffort() {
-	name := e.managedProxyIface()
-	if name == "" || e.keenetic == nil || e.runner.DryRun {
-		return
-	}
-	ctx, cancel := context.WithTimeout(e.baseCtx(), 15*time.Second)
-	defer cancel()
-	if err := keenetic.SetInterfaceGlobal(ctx, e.keenetic, name, true); err != nil {
-		e.Logf("proxy-conn: mark %s global: %v", name, err)
-	}
-	_ = e.keenetic.Save(ctx)
 }
 
 // bringUpXrayProxy brings up an Xray connection in proxy-connection mode:
