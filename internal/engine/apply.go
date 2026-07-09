@@ -54,10 +54,12 @@ func (e *Engine) Activate(id string) error {
 
 	// Verify + rollback deadman (skipped in dry-run: nothing real to probe).
 	if !e.runner.DryRun {
-		if !e.verifyActive(c) {
-			e.Logf("post-activate probe failed for %s — rolling back to %q", c.Name, prev)
+		if ok, detail := e.verifyActive(c); !ok {
+			target := e.probeTarget()
+			reason := firstNonEmpty(detail, "no response before the rollback timeout")
+			e.Logf("post-activate probe failed for %s (target=%s: %s) — rolling back to %q", c.Name, target, reason, prev)
 			e.rollback(prev, c)
-			return fmt.Errorf("activation verification failed for %q; rolled back", c.Name)
+			return fmt.Errorf("activation verification failed for %q: the tunnel did not carry traffic to %s (%s); rolled back — check the server is reachable and not DPI-blocked, or set a different probe target on the Failover page", c.Name, target, reason)
 		}
 	}
 
@@ -175,8 +177,10 @@ func (e *Engine) rollback(prev string, failed model.Connection) {
 }
 
 // verifyActive probes end-to-end connectivity through the freshly-activated
-// connection, retrying until the rollback timeout elapses.
-func (e *Engine) verifyActive(c model.Connection) bool {
+// connection, retrying until the rollback timeout elapses. It returns whether
+// the path verified and, on failure, a short human detail of the last probe
+// error (surfaced to the UI so the user learns WHY activation failed).
+func (e *Engine) verifyActive(c model.Connection) (bool, string) {
 	timeout := time.Duration(e.rollbackTimeout()) * time.Second
 	if timeout <= 0 {
 		timeout = 90 * time.Second
@@ -185,6 +189,7 @@ func (e *Engine) verifyActive(c model.Connection) bool {
 	target := e.probeTarget()
 	const per = 6 * time.Second
 
+	lastDetail := ""
 	for attempt := 1; time.Now().Before(deadline); attempt++ {
 		// Native AWG2: the authoritative signal is a recent peer handshake (a
 		// direct HTTP probe can pass over the WAN even when the tunnel is not
@@ -193,8 +198,9 @@ func (e *Engine) verifyActive(c model.Connection) bool {
 			if _, native := e.nativeIface(c.ID); native {
 				if e.awgNativeHealthy(c.ID) {
 					e.Logf("verify %s: native AWG2 tunnel established (attempt %d)", c.Name, attempt)
-					return true
+					return true, ""
 				}
+				lastDetail = "no recent AmneziaWG peer handshake"
 				time.Sleep(2 * time.Second)
 				continue
 			}
@@ -210,11 +216,14 @@ func (e *Engine) verifyActive(c model.Connection) bool {
 		cancel()
 		if p.OK {
 			e.Logf("verify %s: reachable (%dms, attempt %d)", c.Name, p.LatencyMs, attempt)
-			return true
+			return true, ""
+		}
+		if p.Err != nil {
+			lastDetail = p.Err.Error()
 		}
 		time.Sleep(2 * time.Second)
 	}
-	return false
+	return false, lastDetail
 }
 
 // setActive persists the active connection id.
