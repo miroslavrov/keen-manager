@@ -4,11 +4,37 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/miroslavrov/keen-manager/internal/health"
 	"github.com/miroslavrov/keen-manager/internal/model"
 )
+
+// NormalizeFailoverChain cleans a proposed failover chain: it trims each entry,
+// drops empties and duplicates (keeping first occurrence, preserving order),
+// and partitions the result into recognised entries (a known connection ID or
+// the "direct" sentinel) versus unknown ones the caller should reject. Pure, so
+// CLI/API chain validation is unit-tested here without a device.
+func NormalizeFailoverChain(chain, connIDs []string) (clean, unknown []string) {
+	known := map[string]bool{DirectNode: true}
+	for _, id := range connIDs {
+		known[id] = true
+	}
+	seen := map[string]bool{}
+	for _, raw := range chain {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		clean = append(clean, id)
+		if !known[id] {
+			unknown = append(unknown, id)
+		}
+	}
+	return clean, unknown
+}
 
 // DirectNode is the sentinel chain entry meaning "no tunnel" (direct / kill
 // switch), always valid as the last hop of a fallback chain.

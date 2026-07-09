@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -41,6 +42,8 @@ func main() {
 		cmdNfqws(rest)
 	case "route":
 		cmdRoute(rest)
+	case "failover", "fo":
+		cmdFailover(rest)
 	case "passwd", "password":
 		cmdPasswd(rest)
 	case "auth":
@@ -92,6 +95,15 @@ COMMANDS:
   passwd <new-password>        set the web UI password and enable auth
   auth disable                 turn off the web UI login (recover from a lockout)
   auth status                  show whether the web UI login is enabled
+  failover show                print the failover configuration (JSON)
+  failover on|off              enable / disable the failover engine
+  failover chain <id...|direct>
+                               set the fallback chain (ids from 'conn list';
+                               a trailing "direct" drops to the kill-switch path)
+  failover interval <seconds>  set the health-check interval
+  failover threshold <n>       set consecutive failures before switching
+  failover autoreturn <on|off> return to a higher-priority node when it recovers
+  failover probe <url>         set the end-to-end connectivity probe target
   route reapply                re-install transparent-proxy rules (ndm hook)
   install-hook                 install the ndm netfilter.d hook (done by installer)
   uninstall-hook               remove the ndm netfilter.d hook
@@ -262,6 +274,99 @@ func cmdRoute(args []string) {
 		fatal("%v", err)
 	}
 	fmt.Println("routes reapplied")
+}
+
+func cmdFailover(args []string) {
+	eng := openEngine()
+	if len(args) == 0 || args[0] == "show" || args[0] == "status" || args[0] == "get" {
+		printJSON(eng.Failover())
+		return
+	}
+	switch args[0] {
+	case "on", "enable":
+		saveFailover(eng, func(f *model.Failover) { f.Enabled = true })
+		fmt.Println("failover enabled")
+	case "off", "disable":
+		saveFailover(eng, func(f *model.Failover) { f.Enabled = false })
+		fmt.Println("failover disabled")
+	case "chain":
+		clean, unknown := engine.NormalizeFailoverChain(args[1:], connIDs(eng))
+		if len(unknown) > 0 {
+			fatal("unknown connection id(s): %s — see `keen-manager conn list` (\"direct\" is always allowed)", strings.Join(unknown, ", "))
+		}
+		saveFailover(eng, func(f *model.Failover) { f.Chain = clean })
+		if len(clean) == 0 {
+			fmt.Println("failover chain cleared")
+		} else {
+			fmt.Printf("failover chain set: %s\n", strings.Join(clean, " -> "))
+		}
+	case "interval":
+		n := mustPositiveInt(args, 1, "failover interval <seconds>")
+		saveFailover(eng, func(f *model.Failover) { f.CheckIntervalS = n })
+		fmt.Printf("failover check interval: %ds\n", n)
+	case "threshold":
+		n := mustPositiveInt(args, 1, "failover threshold <n>")
+		saveFailover(eng, func(f *model.Failover) { f.FailureThreshold = n })
+		fmt.Printf("failover failure threshold: %d\n", n)
+	case "autoreturn":
+		on := mustOnOff(args, 1, "failover autoreturn <on|off>")
+		saveFailover(eng, func(f *model.Failover) { f.AutoReturn = on })
+		fmt.Printf("failover auto-return: %v\n", on)
+	case "probe":
+		if len(args) < 2 || strings.TrimSpace(args[1]) == "" {
+			fatal("usage: keen-manager failover probe <url>")
+		}
+		saveFailover(eng, func(f *model.Failover) { f.ProbeTarget = strings.TrimSpace(args[1]) })
+		fmt.Printf("failover probe target: %s\n", strings.TrimSpace(args[1]))
+	default:
+		fatal("unknown failover subcommand %q (show|on|off|chain|interval|threshold|autoreturn|probe)", args[0])
+	}
+}
+
+// saveFailover reads the current config, applies mod, and persists it.
+func saveFailover(eng *engine.Engine, mod func(*model.Failover)) {
+	fo := eng.Failover()
+	mod(&fo)
+	if err := eng.SaveFailover(fo); err != nil {
+		fatal("%v", err)
+	}
+}
+
+// connIDs returns the IDs of all configured connections.
+func connIDs(eng *engine.Engine) []string {
+	conns := eng.Connections()
+	ids := make([]string, 0, len(conns))
+	for _, c := range conns {
+		ids = append(ids, c.ID)
+	}
+	return ids
+}
+
+// mustPositiveInt parses args[i] as a positive integer or exits with usage.
+func mustPositiveInt(args []string, i int, usage string) int {
+	if len(args) <= i {
+		fatal("usage: keen-manager %s", usage)
+	}
+	n, err := strconv.Atoi(args[i])
+	if err != nil || n <= 0 {
+		fatal("expected a positive integer, got %q (usage: keen-manager %s)", args[i], usage)
+	}
+	return n
+}
+
+// mustOnOff parses args[i] as on/off (or true/false, enable/disable).
+func mustOnOff(args []string, i int, usage string) bool {
+	if len(args) <= i {
+		fatal("usage: keen-manager %s", usage)
+	}
+	switch strings.ToLower(args[i]) {
+	case "on", "true", "yes", "enable", "1":
+		return true
+	case "off", "false", "no", "disable", "0":
+		return false
+	}
+	fatal("expected on|off, got %q (usage: keen-manager %s)", args[i], usage)
+	return false
 }
 
 func cmdPasswd(args []string) {
