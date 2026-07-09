@@ -27,6 +27,13 @@ AWG2).
   suffix is kept on purpose so `xray run -confdir` (which only merges
   `*.json/*.yaml/*.toml`) never loads a half-written temp; a stale temp is
   cleared before each write. Unit-tested (`internal/xray/control_test.go`).
+- [x] **Xray single-server config no longer fails dependency resolution** (fix
+  4adcb72). Once configs actually loaded, activation/select-best hit
+  *"core: not all dependencies are resolved."* — the `api` block always listed
+  `ObservatoryService`, but the observatory only exists in balancer mode, so a
+  pinned single-server config advertised a gRPC service with no backing feature.
+  `api.services` is now built from the features actually present (Handler/Stats/
+  Routing always; Observatory only with the balancer). Regression-tested.
 - [x] **Routes can target an Xray connection, not only AWG** (feat a9fbffe).
   When one or more enabled routes target an Xray connection, its active config
   is built in **split-tunnel** mode: only the routed domains/subnets egress
