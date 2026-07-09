@@ -33,11 +33,13 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 // handleAuthState is GET /api/auth.
 func (s *Server) handleAuthState(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
 	writeJSON(w, http.StatusOK, s.eng.AuthState(s.authed(r)))
 }
 
 // handleLogin is POST /api/login.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
 	var body struct {
 		Password string `json:"password"`
 	}
@@ -58,6 +60,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 // handleLogout is POST /api/logout.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
 	if c, err := r.Cookie(engine.SessionCookieName); err == nil {
 		s.eng.Logout(c.Value)
 	}

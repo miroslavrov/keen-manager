@@ -26,6 +26,15 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"error": msg})
 }
 
+// noStore marks a response as never-cacheable. Auth-sensitive endpoints use it
+// so a stale browser/proxy cache can never make the UI believe it is signed in
+// (or signed out) when the daemon disagrees — the root of the "sometimes lets
+// me in without a password" class of bugs.
+func noStore(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+}
+
 // readJSON decodes a JSON request body into dst (size-limited).
 func readJSON(r *http.Request, dst any) error {
 	defer r.Body.Close()
