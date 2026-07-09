@@ -199,6 +199,16 @@ type Failover struct {
 	AutoReturn       bool            `json:"auto_return"`
 	ProbeTarget      string          `json:"probe_target"`
 	History          []FailoverEvent `json:"history,omitempty"`
+
+	// nfqws guard: when NfqwsGuard is on and the device is on the direct path
+	// (no active tunnel), a dead/inert nfqws2 DPI-bypass — daemon down, NFQUEUE
+	// modules missing, or a probe of NfqwsProbeDomains failing on the direct
+	// path — drives a fallback to NfqwsFallbackTo (a connection ID of an AWG
+	// tunnel that routes around DPI). This makes "bypass strategy died → fall
+	// back to AWG" automatic. Empty NfqwsFallbackTo disables the action.
+	NfqwsGuard        bool     `json:"nfqws_guard,omitempty"`
+	NfqwsFallbackTo   string   `json:"nfqws_fallback_to,omitempty"`
+	NfqwsProbeDomains []string `json:"nfqws_probe_domains,omitempty"`
 }
 
 // Platform captures detected device facts (read-only, filled at runtime).

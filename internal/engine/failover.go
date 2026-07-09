@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/miroslavrov/keen-manager/internal/health"
@@ -76,6 +77,14 @@ func (e *Engine) failoverTick() {
 		return
 	}
 	st := e.store.Get()
+
+	// The nfqws-bypass guard runs first and independently of the chain: if we're
+	// on the direct path and the DPI bypass has died, fall back to a tunnel. If
+	// it switched us, stop here — the chain re-evaluates the new active next tick.
+	if e.nfqwsGuardTick(st) {
+		return
+	}
+
 	fo := st.Failover
 	if !fo.Enabled {
 		return
@@ -260,6 +269,132 @@ func (e *Engine) recordFailover(from, to, reason string) {
 
 func (e *Engine) setCurrentIndex(i int) {
 	_ = e.store.Mutate(func(s *model.State) error { s.Failover.CurrentIndex = i; return nil })
+}
+
+// ----- nfqws-bypass guard -----
+
+// nfqwsGuardTick implements "DPI bypass died → fall back to a tunnel". It only
+// acts on the direct path (no active tunnel), where nfqws2 is the mechanism
+// carrying otherwise-blocked traffic; once a tunnel is up, the bypass is no
+// longer load-bearing so the guard stands down. Returns true when it switched
+// the active connection (so the caller can skip the chain logic this tick).
+func (e *Engine) nfqwsGuardTick(st model.State) bool {
+	fo := st.Failover
+	if !fo.NfqwsGuard || fo.NfqwsFallbackTo == "" {
+		return false
+	}
+	// Only guard the direct path; a live tunnel doesn't depend on nfqws2.
+	if st.ActiveConnID != "" {
+		e.nfResetFail()
+		return false
+	}
+	unhealthy, reason := e.nfqwsUnhealthy(fo.NfqwsProbeDomains)
+	if !unhealthy {
+		e.nfResetFail()
+		return false
+	}
+	threshold := fo.FailureThreshold
+	if threshold <= 0 {
+		threshold = 3
+	}
+	if n := e.nfIncFail(); n < threshold {
+		e.Logf("nfqws guard: bypass unhealthy (%s) (%d/%d)", reason, n, threshold)
+		return false
+	}
+
+	target := fo.NfqwsFallbackTo
+	if target == DirectNode {
+		// We're already direct; "falling back" to direct can't restore blocked
+		// sites, so there is nothing useful to do.
+		e.nfResetFail()
+		return false
+	}
+	if !e.nodeReachable(target) {
+		e.Logf("nfqws guard: fallback %s not reachable", target)
+		return false
+	}
+	if err := e.Activate(target); err != nil {
+		e.Logf("nfqws guard: activating %s failed: %v", target, err)
+		return false
+	}
+	e.recordFailover(DirectNode, target, "nfqws bypass dead — "+reason)
+	e.nfResetFail()
+	return true
+}
+
+// nfqwsUnhealthy reports whether the nfqws2 DPI bypass is effectively dead, with
+// a human reason. It is only meaningful when nfqws2 is installed (nothing to
+// guard otherwise). Signals, in order: daemon not running, required NFQUEUE
+// kernel modules missing, and — when probe domains are configured — every one
+// of them failing on the direct path (a positive sign the strategy stopped
+// working even though the daemon looks up). Any single probe domain reachable
+// means the bypass is working, so the probe never false-positives on an
+// unrelated single-site outage.
+func (e *Engine) nfqwsUnhealthy(probeDomains []string) (bool, string) {
+	if !e.nfqws.Installed() {
+		return false, ""
+	}
+	if bad, reason := nfqwsDaemonUnhealthy(e.nfqws.Running(), e.nfqwsKernelReady()); bad {
+		return true, reason
+	}
+	domains := cleanProbeDomains(probeDomains)
+	if len(domains) == 0 {
+		return false, ""
+	}
+	ctx, cancel := context.WithTimeout(e.baseCtx(), 8*time.Second)
+	defer cancel()
+	for _, d := range domains {
+		if health.DirectHTTP(ctx, "https://"+d+"/", 6*time.Second).OK {
+			return false, "" // at least one should-bypass domain is reachable
+		}
+	}
+	return true, fmt.Sprintf("probe of %d should-bypass domain(s) failed on the direct path", len(domains))
+}
+
+// nfqwsKernelReady is a thin wrapper so nfqwsUnhealthy reads cleanly.
+func (e *Engine) nfqwsKernelReady() bool {
+	ready, _ := e.nfqws.KernelModulesStatus()
+	return ready
+}
+
+// nfqwsDaemonUnhealthy is the pure daemon/kernel decision, split out so it can be
+// unit-tested without a device.
+func nfqwsDaemonUnhealthy(running, kernelReady bool) (bool, string) {
+	if !running {
+		return true, "daemon not running"
+	}
+	if !kernelReady {
+		return true, "NFQUEUE kernel modules missing"
+	}
+	return false, ""
+}
+
+// cleanProbeDomains normalises and dedups the configured probe domains.
+func cleanProbeDomains(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, d := range in {
+		d = sanitizeDomain(d)
+		if d == "" || seen[d] {
+			continue
+		}
+		seen[d] = true
+		out = append(out, d)
+	}
+	return out
+}
+
+func (e *Engine) nfIncFail() int {
+	e.foMu.Lock()
+	defer e.foMu.Unlock()
+	e.nfFail++
+	return e.nfFail
+}
+
+func (e *Engine) nfResetFail() {
+	e.foMu.Lock()
+	e.nfFail = 0
+	e.foMu.Unlock()
 }
 
 // ----- fail counter -----

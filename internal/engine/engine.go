@@ -61,6 +61,7 @@ type Engine struct {
 
 	foMu   sync.Mutex
 	foFail int // consecutive failover probe failures
+	nfFail int // consecutive nfqws-guard unhealthy observations
 
 	startTime time.Time
 
