@@ -89,10 +89,13 @@ export function SubscriptionsPage() {
           : undefined,
       })
     },
-    onError: () =>
+    onError: (err) =>
       toast({
         variant: 'error',
         title: t('subscriptions.selectBestErrorTitle'),
+        // The daemon explains *why* (no reachable server, or the tunnel failed
+        // verification with the probe target + reason) — show it verbatim.
+        description: err instanceof Error && err.message ? err.message : undefined,
       }),
   })
 

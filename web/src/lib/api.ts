@@ -19,6 +19,7 @@ import type {
   DomainCheck,
   Failover,
   Health,
+  InterfacesView,
   ListResolveResult,
   LogResponse,
   LogService,
@@ -81,11 +82,25 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     emitUnauthorized()
     throw new UnauthorizedError()
   }
+  // Read the body once; reuse it for both the error path and the success parse.
+  const text = await res.text()
   if (!res.ok) {
-    throw new Error(`${method} ${path} failed: ${res.status}`)
+    // The daemon renders failures as {"error": "..."} (writeErr). Surface that
+    // real reason to the caller so pages can show *why* an action failed (e.g.
+    // an activation that rolled back because the tunnel wouldn't carry traffic)
+    // instead of a generic "failed: 500".
+    let detail = ''
+    if (text) {
+      try {
+        const parsed = JSON.parse(text) as { error?: string; message?: string }
+        detail = parsed.error || parsed.message || text
+      } catch {
+        detail = text
+      }
+    }
+    throw new Error(detail || `${method} ${path} failed: ${res.status}`)
   }
   // 204 / empty body tolerance
-  const text = await res.text()
   if (!text) return {} as T
   return JSON.parse(text) as T
 }
@@ -265,6 +280,13 @@ export const api = {
       () => ({ ok: true, selected_id: mocks.mockServers[id]?.[0]?.id }),
     ),
 
+  // ---- router interfaces (live from KeeneticOS RCI) ----
+  interfaces: () =>
+    withMock<InterfacesView>(
+      () => request('/interfaces'),
+      () => mocks.mockInterfaces,
+    ),
+
   // ---- routes / "Маршруты" ----
   routes: () =>
     withMock<RouteEntry[]>(() => request('/routes'), () => mocks.mockRoutes),
@@ -280,7 +302,10 @@ export const api = {
     preset_id?: string
     domains?: string[]
     subnets?: string[]
-    target_conn_id: string
+    // A route needs one target: a keen-manager connection (target_conn_id) OR a
+    // router interface picked from the live interface list (target_iface).
+    target_conn_id?: string
+    target_iface?: string
   }) =>
     withOk<RouteEntry>(
       () => request('/routes', { method: 'POST', body }),
@@ -291,6 +316,7 @@ export const api = {
         domain_count: body.domains?.length ?? 0,
         subnet_count: body.subnets?.length ?? 0,
         target_conn_id: body.target_conn_id,
+        target_iface: body.target_iface,
         enabled: true,
         applied: false,
       }),

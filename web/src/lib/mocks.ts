@@ -10,6 +10,7 @@ import type {
   DomainCheck,
   Failover,
   Health,
+  InterfacesView,
   LogResponse,
   Nfqws,
   NfqwsConf,
@@ -439,6 +440,21 @@ export const mockRoutes: RouteEntry[] = [
     note: 'target has no native interface yet — activate its AmneziaWG connection',
   },
 ]
+
+// Router interfaces as KeeneticOS would report them over RCI. A native AWG
+// tunnel keen-manager created (Wireguard1, tied back to awg-nl-ams), a
+// WireGuard interface made in the Keenetic UI (Wireguard0), the router's own
+// bundled VPN server (not routable), plus the LAN bridge and WAN uplink.
+export const mockInterfaces: InterfacesView = {
+  dns_routing_available: true,
+  interfaces: [
+    { name: 'Wireguard0', label: 'Home WG', description: 'Home WG', type: 'Wireguard', up: true, connected: true, address: '10.9.0.2', is_wireguard: true, routable: true },
+    { name: 'Wireguard1', label: 'Amnezia NL-1', description: 'Amnezia NL-1', type: 'Wireguard', up: true, connected: true, address: '10.7.0.2', is_wireguard: true, routable: true, managed_conn_id: 'awg-nl-ams' },
+    { name: 'Wireguard2', label: 'Wireguard VPN Server', description: 'Wireguard VPN Server', type: 'Wireguard', up: true, connected: false, address: '192.168.99.1', is_wireguard: true, routable: false },
+    { name: 'Bridge0', label: 'Home segment', description: 'Home segment', type: 'Bridge', up: true, connected: true, address: '192.168.1.1', security: 'private', is_wireguard: false, routable: false },
+    { name: 'GigabitEthernet1', label: 'Provider', description: 'Provider', type: 'GigabitEthernet', up: true, connected: true, address: '203.0.113.24', security: 'public', is_wireguard: false, routable: false },
+  ],
+}
 
 export const mockPresetCatalog: PresetCatalog = {
   categories: ['social', 'media', 'ai', 'gaming', 'developer', 'cloud', 'block'],

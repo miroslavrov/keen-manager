@@ -193,11 +193,47 @@ export interface RouteEntry {
   icon?: string
   domain_count: number
   subnet_count: number
-  target_conn_id: string
+  target_conn_id?: string
   target_name?: string
   target_iface?: string
   enabled: boolean
   applied: boolean
+  note?: string
+}
+
+/** One router interface as reported live by KeeneticOS over RCI
+ * (GET /api/interfaces). Mirrors engine.InterfaceView. Powers the "pick a
+ * router interface" dropdown so a route can bind to a real device interface,
+ * not just a keen-manager connection. */
+export interface RouterInterface {
+  /** NDMS interface id, e.g. "Wireguard0" — the value a route binds to. */
+  name: string
+  /** Human-friendly description when set, else the name. */
+  label: string
+  description?: string
+  /** NDMS transport type ("Wireguard", "Bridge", …). */
+  type: string
+  up: boolean
+  connected: boolean
+  address?: string
+  security?: string
+  /** Native WireGuard/AmneziaWG interface. */
+  is_wireguard: boolean
+  /** Can back a Routes dns-proxy route (a WireGuard interface that isn't the
+   * router's own bundled VPN server). */
+  routable: boolean
+  /** keen-manager connection that created this interface, when applicable. */
+  managed_conn_id?: string
+}
+
+/** GET /api/interfaces: the router's interfaces plus whether the firmware
+ * exposes the native DNS-routing stack a route needs. Mirrors
+ * engine.InterfacesView. */
+export interface InterfacesView {
+  interfaces: RouterInterface[]
+  dns_routing_available: boolean
+  /** Human explanation when the list is empty/degraded (RCI unreachable, or
+   * running off-device). */
   note?: string
 }
 

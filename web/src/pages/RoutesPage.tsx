@@ -7,6 +7,7 @@ import {
   Download,
   Gamepad2,
   Loader2,
+  Network,
   PlayCircle,
   Plus,
   Search,
@@ -34,7 +35,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -42,7 +46,17 @@ import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useT } from '@/i18n'
-import type { Conn, Preset, RouteEntry } from '@/lib/types'
+import type { Preset, RouteEntry } from '@/lib/types'
+
+// A route target is encoded as "conn:<id>" (a keen-manager connection) or
+// "iface:<name>" (a router interface picked from the live KeeneticOS list), so a
+// single dropdown can offer both. decodeTarget turns it back into the request
+// body the daemon expects (target_conn_id XOR target_iface).
+function decodeTarget(v: string): { target_conn_id?: string; target_iface?: string } {
+  if (v.startsWith('iface:')) return { target_iface: v.slice('iface:'.length) }
+  if (v.startsWith('conn:')) return { target_conn_id: v.slice('conn:'.length) }
+  return {}
+}
 
 // Category visual metadata: a lucide glyph + a tint. Kept literal (not computed)
 // so Tailwind's content scanner keeps every class in the bundle.
@@ -90,6 +104,16 @@ function ServiceTile({
   )
 }
 
+/** One selectable route target — a keen-manager connection or a live router
+ * interface, unified behind a prefixed value ("conn:…" / "iface:…"). */
+interface TargetOption {
+  value: string
+  label: string
+  hint?: string
+  /** For interfaces: whether it is currently up on the router. */
+  live?: boolean
+}
+
 export function RoutesPage() {
   const t = useT()
   const { data: connections } = useQuery({
@@ -97,24 +121,73 @@ export function RoutesPage() {
     queryFn: api.connections,
     refetchInterval: 8000,
   })
+  // Router interfaces pulled live from KeeneticOS over RCI (GET /api/interfaces)
+  // — the "interfaces from the router" dropdown the user asked for.
+  const { data: ifaceData } = useQuery({
+    queryKey: ['interfaces'],
+    queryFn: api.interfaces,
+    refetchInterval: 15000,
+  })
 
-  // Only native-interface connections (AmneziaWG) can back a router-native
-  // dns-proxy route. Xray carries traffic transparently and can't be a target.
-  const targets = React.useMemo(
-    () => (connections ?? []).filter((c) => c.type === 'awg'),
+  // Connection targets: only native-interface connections (AmneziaWG) can back a
+  // router-native dns-proxy route. Xray carries traffic transparently.
+  const connOptions = React.useMemo<TargetOption[]>(
+    () =>
+      (connections ?? [])
+        .filter((c) => c.type === 'awg')
+        .map((c) => ({ value: `conn:${c.id}`, label: c.name, hint: c.location })),
     [connections],
   )
+
+  // Interface targets: routable WireGuard interfaces read live from the router,
+  // minus any a listed keen-manager connection already represents (shown as the
+  // connection instead, so the same tunnel isn't offered twice).
+  const connIds = React.useMemo(
+    () => new Set((connections ?? []).map((c) => c.id)),
+    [connections],
+  )
+  const ifaceOptions = React.useMemo<TargetOption[]>(
+    () =>
+      (ifaceData?.interfaces ?? [])
+        .filter((i) => i.routable)
+        .filter((i) => !(i.managed_conn_id && connIds.has(i.managed_conn_id)))
+        .map((i) => ({
+          value: `iface:${i.name}`,
+          label: i.label || i.name,
+          hint: i.name,
+          live: i.up,
+        })),
+    [ifaceData, connIds],
+  )
+
+  const allValues = React.useMemo(
+    () => [...connOptions, ...ifaceOptions].map((o) => o.value),
+    [connOptions, ifaceOptions],
+  )
+  const hasTarget = allValues.length > 0
   const [target, setTarget] = React.useState<string>('')
 
+  // Keep a valid selection: default to the first available target and recover if
+  // the current pick disappears (e.g. an interface went away on the router).
   React.useEffect(() => {
-    if (!target && targets.length > 0) setTarget(targets[0].id)
-  }, [targets, target])
+    if (allValues.length === 0) return
+    if (!target || !allValues.includes(target)) setTarget(allValues[0])
+  }, [allValues, target])
+
+  const dnsAvailable = ifaceData?.dns_routing_available ?? true
 
   return (
     <div className="space-y-6">
       <PageHeader title={t('routes.title')} description={t('routes.desc')} />
 
-      <TargetPicker targets={targets} value={target} onChange={setTarget} />
+      <TargetPicker
+        connOptions={connOptions}
+        ifaceOptions={ifaceOptions}
+        value={target}
+        onChange={setTarget}
+        dnsAvailable={dnsAvailable}
+        note={ifaceData?.note}
+      />
 
       <Tabs defaultValue="catalog">
         <TabsList>
@@ -124,13 +197,13 @@ export function RoutesPage() {
         </TabsList>
 
         <TabsContent value="catalog">
-          <CatalogTab target={target} hasTarget={targets.length > 0} />
+          <CatalogTab target={target} hasTarget={hasTarget} />
         </TabsContent>
         <TabsContent value="active">
           <ActiveRoutesTab />
         </TabsContent>
         <TabsContent value="custom">
-          <CustomTab target={target} hasTarget={targets.length > 0} />
+          <CustomTab target={target} hasTarget={hasTarget} />
         </TabsContent>
       </Tabs>
     </div>
@@ -138,18 +211,25 @@ export function RoutesPage() {
 }
 
 function TargetPicker({
-  targets,
+  connOptions,
+  ifaceOptions,
   value,
   onChange,
+  dnsAvailable,
+  note,
 }: {
-  targets: Conn[]
+  connOptions: TargetOption[]
+  ifaceOptions: TargetOption[]
   value: string
   onChange: (v: string) => void
+  dnsAvailable: boolean
+  note?: string
 }) {
   const t = useT()
+  const hasAny = connOptions.length > 0 || ifaceOptions.length > 0
   return (
     <Card>
-      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">
             {t('routes.targetLabel')}
@@ -157,25 +237,64 @@ function TargetPicker({
           <p className="mt-0.5 text-xs text-muted-foreground">
             {t('routes.targetHint')}
           </p>
+          {!dnsAvailable ? (
+            <p className="mt-1 text-xs text-warning">
+              {t('routes.dnsUnavailable')}
+            </p>
+          ) : null}
+          {note ? (
+            <p className="mt-1 text-xs text-muted-foreground">{note}</p>
+          ) : null}
         </div>
-        {targets.length === 0 ? (
-          <Badge variant="warning" className="shrink-0">
-            {t('routes.noTargets')}
-          </Badge>
+        {!hasAny ? (
+          <div className="shrink-0 sm:text-right">
+            <Badge variant="warning">{t('routes.noTargets')}</Badge>
+            <p className="mt-1 max-w-xs text-xs text-muted-foreground">
+              {t('routes.noTargetsHint')}
+            </p>
+          </div>
         ) : (
           <Select value={value} onValueChange={onChange}>
-            <SelectTrigger className="w-full sm:w-72">
+            <SelectTrigger className="w-full sm:w-80">
               <SelectValue placeholder={t('routes.targetPlaceholder')} />
             </SelectTrigger>
             <SelectContent>
-              {targets.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                  {c.location ? (
-                    <span className="text-muted-foreground"> · {c.location}</span>
-                  ) : null}
-                </SelectItem>
-              ))}
+              {connOptions.length > 0 ? (
+                <SelectGroup>
+                  <SelectLabel>{t('routes.groupConnections')}</SelectLabel>
+                  {connOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                      {o.hint ? (
+                        <span className="text-muted-foreground"> · {o.hint}</span>
+                      ) : null}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ) : null}
+              {connOptions.length > 0 && ifaceOptions.length > 0 ? (
+                <SelectSeparator />
+              ) : null}
+              {ifaceOptions.length > 0 ? (
+                <SelectGroup>
+                  <SelectLabel className="flex items-center gap-1.5">
+                    <Network className="h-3.5 w-3.5" />
+                    {t('routes.groupInterfaces')}
+                  </SelectLabel>
+                  {ifaceOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                      <span className="font-mono text-muted-foreground">
+                        {' · '}
+                        {o.hint}
+                      </span>
+                      {o.live === false ? (
+                        <span className="text-warning"> · {t('routes.ifaceDown')}</span>
+                      ) : null}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ) : null}
             </SelectContent>
           </Select>
         )}
@@ -221,7 +340,7 @@ function CatalogTab({
         await api.createRoute({
           preset_id: id,
           name: p?.name,
-          target_conn_id: target,
+          ...decodeTarget(target),
         })
       }
       return ids.length
@@ -600,7 +719,7 @@ function CustomTab({
         name: name.trim() || undefined,
         domains: splitLines(domains),
         subnets: splitLines(subnets),
-        target_conn_id: target,
+        ...decodeTarget(target),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['routes'] })

@@ -13,12 +13,17 @@ export const routes = {
 
     // Target picker
     targetLabel: 'Route through',
-    targetPlaceholder: 'Select a connection',
+    targetPlaceholder: 'Select a target',
     targetHint:
-      'Only connections with a native interface (AmneziaWG) can back a route. Xray connections carry traffic transparently — use a policy instead.',
-    noTargets: 'No routable connections yet',
+      'Route through a keen-manager AmneziaWG connection or any WireGuard interface on the router (pulled live from KeeneticOS). Xray connections carry traffic transparently and can’t back a route — use a policy instead.',
+    groupConnections: 'keen-manager connections',
+    groupInterfaces: 'Router interfaces',
+    ifaceDown: 'down',
+    dnsUnavailable:
+      'Native DNS routing isn’t available on this firmware, so routes can’t be applied — it needs KeeneticOS 5.x with AWG2 support.',
+    noTargets: 'No routable targets yet',
     noTargetsHint:
-      'Add and activate an AmneziaWG connection first — it appears here as a native interface.',
+      'Activate an AmneziaWG connection, or create a WireGuard interface on the router — it shows up here, pulled live from KeeneticOS.',
 
     // Catalog
     searchPlaceholder: 'Search services…',
@@ -82,7 +87,7 @@ export const routes = {
 
     // Keenetic limit hint
     chunkHint:
-      'Large lists are split into ≤100-domain groups automatically to fit Keenetic’s per-list limit.',
+      'Large lists are split into ≤300-domain groups automatically to fit Keenetic’s per-list limit.',
 
     // Toasts
     created: 'Route created',
@@ -103,12 +108,17 @@ export const routes = {
     tabCustom: 'Свои и импорт',
 
     targetLabel: 'Направить через',
-    targetPlaceholder: 'Выберите подключение',
+    targetPlaceholder: 'Выберите цель',
     targetHint:
-      'Маршрут может опираться только на подключение с нативным интерфейсом (AmneziaWG). Xray ведёт трафик прозрачно — для него используйте политику.',
-    noTargets: 'Пока нет маршрутизируемых подключений',
+      'Маршрут через AmneziaWG-подключение keen-manager или любой WireGuard-интерфейс роутера (тянется вживую из KeeneticOS). Xray ведёт трафик прозрачно и не может быть целью — для него используйте политику.',
+    groupConnections: 'Подключения keen-manager',
+    groupInterfaces: 'Интерфейсы роутера',
+    ifaceDown: 'выкл',
+    dnsUnavailable:
+      'На этой прошивке штатная DNS-маршрутизация недоступна, применить маршруты нельзя — нужен KeeneticOS 5.x с поддержкой AWG2.',
+    noTargets: 'Пока нет целей для маршрута',
     noTargetsHint:
-      'Сначала добавьте и активируйте AmneziaWG-подключение — оно появится здесь как нативный интерфейс.',
+      'Активируйте AmneziaWG-подключение или создайте WireGuard-интерфейс на роутере — он появится здесь, вживую из KeeneticOS.',
 
     searchPlaceholder: 'Поиск сервисов…',
     selected: 'Выбрано: {count}',
@@ -167,7 +177,7 @@ export const routes = {
     appendToDomains: 'Добавлено в поле доменов ниже.',
 
     chunkHint:
-      'Большие списки автоматически делятся на группы ≤100 доменов под лимит одного списка Keenetic.',
+      'Большие списки автоматически делятся на группы ≤300 доменов под лимит одного списка Keenetic.',
 
     created: 'Маршрут создан',
     createdDesc: '«{name}» теперь идёт через {target}.',

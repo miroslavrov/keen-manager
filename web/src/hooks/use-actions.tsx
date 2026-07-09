@@ -39,11 +39,16 @@ export function useConnectionActions() {
       }
       toast({ variant: 'success', title: messages[vars.action] })
     },
-    onError: () => {
+    onError: (err) => {
+      // Surface the daemon's real reason (e.g. an activation that rolled back
+      // because the tunnel wouldn't carry traffic through DPI) instead of a
+      // generic "action failed" — the backend now returns the probe target and
+      // failure cause, and the API client threads it through as err.message.
+      const detail = err instanceof Error && err.message ? err.message : ''
       toast({
         variant: 'error',
         title: t('actions.failedTitle'),
-        description: t('actions.failedDesc'),
+        description: detail || t('actions.failedDesc'),
       })
     },
   })
