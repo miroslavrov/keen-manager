@@ -16,6 +16,45 @@ AWG2).
 
 ---
 
+## Session 7 — Xray activation fix + per-service Xray routing + one exit point
+
+- [x] **Xray activation no longer fails on config format** (fix 572827c). The
+  pre-apply temp config is written as `config.json.tmp`; Xray infers a config's
+  format from its extension, so `xray -test -config config.json.tmp` bailed with
+  *"Failed to get format of …/config.json.tmp"* — the on-device "xray config
+  invalid" activation failure the user hit. `Controller.Validate` now passes
+  `-format json` explicitly (keen-manager only ever emits JSON). The `.tmp`
+  suffix is kept on purpose so `xray run -confdir` (which only merges
+  `*.json/*.yaml/*.toml`) never loads a half-written temp; a stale temp is
+  cleared before each write. Unit-tested (`internal/xray/control_test.go`).
+- [x] **Routes can target an Xray connection, not only AWG** (feat a9fbffe).
+  When one or more enabled routes target an Xray connection, its active config
+  is built in **split-tunnel** mode: only the routed domains/subnets egress
+  through the server outbound and everything else falls through to a `direct`
+  catch-all. With no routes it stays a full tunnel (unchanged). Domains map to
+  Xray's `domain:` matcher (matches sub-domains); already-prefixed matchers pass
+  through. Applying/removing a route on the *active* Xray connection rebuilds →
+  re-validates → restarts Xray; on a non-active connection it stays pending and
+  is compiled in at activation. Unit-tested (config generation + engine
+  membership). **This is "routes work with Xray, not just AWG."**
+- [x] **One exit point for native AWG** (feat a9fbffe). After a successful
+  switch, the *previously* active connection's `WireguardN` interface (and any
+  routes pinned to it) is torn down, so trying subscription locations no longer
+  piles up interfaces on the router. Done only post-verify, so a failed switch
+  never removes the working tunnel — rollback restores the previous one instead.
+- [~] **Routes target picker offers Xray tunnels** (web). The Routes dropdown
+  gains an "Xray tunnels" group alongside keen-manager AWG connections and live
+  router interfaces; the DNS-routing warning is suppressed when only Xray targets
+  exist (Xray routes don't use the dns-proxy stack). Needs the embedded bundle
+  rebuilt + committed (blocked on npm registry access in the sandbox).
+- [ ] **On-device validation (session 7 items):** confirm on the user's 5.1.0 /
+  BlancVPN Xray subscription that (a) activation now passes `xray -test` and the
+  tunnel carries traffic; (b) a route on the Xray connection sends only those
+  services through it while the rest stays direct; (c) switching AWG locations
+  leaves exactly one `WireguardN` on the router.
+
+---
+
 ## Done — landed this iteration / Сделано
 
 - **Subscriptions parse like a native client.** base64 / plain / Clash-YAML /
