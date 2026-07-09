@@ -16,6 +16,48 @@ AWG2).
 
 ---
 
+## Session 11 — release hardening (P2) + install fix + CLI parity
+
+- [x] **Installer resolves the newest release by SemVer** (`fix(install)`
+  143209e). `install.sh` took the first `tag_name` from the GitHub `/releases`
+  API assuming newest-first; the API is not ordered that way (v0.1.0-beta.10
+  came back *behind* beta.9), so installs pulled the stale beta.9. Now pulls
+  the whole list and picks the max SemVer in pure awk (busybox-safe). README
+  (EN+RU) manual-download URLs and ARCHITECTURE.md updated (the
+  `latest/download` shortcut 404s on a pre-release-only repo). Served from
+  `main`, so the fix took effect with no new release.
+- [x] **`rollback_timeout_s=0` is the explicit default** (`fix(engine)`
+  7354bc8). 0/negative → the 90s default; a tiny positive value is clamped to a
+  10s floor so a rollback can't fire before one probe cycle completes. Pure
+  `normalizeRollbackTimeout`, unit-tested.
+- [x] **Single-instance daemon guard** (`feat(daemon)` 9dcf293). An advisory
+  flock at `$RUN_DIR/keen-manager.lock` refuses a second daemon (naming the
+  holder pid); the kernel releases it on death, so it never goes stale. A
+  read-only lock dir is a warning, not fatal. `platform.Lock`, unit-tested +
+  verified end-to-end.
+- [x] **Failover backoff + jitter when the whole chain is down**
+  (`feat(engine)` aaeba95). A "nothing reachable" round arms an exponential
+  backoff (30s base, doubling, 5min cap) with full jitter instead of
+  re-attempting every server every tick; cleared the instant we switch, the
+  active recovers, or the config changes. Pure `backoffDelay`, unit-tested.
+- [x] **Per-attempt timeout on failover-driven activations** (`feat(engine)`
+  efb9d4c). `Activate` is threaded with a context; loop callers use
+  `activateWithin` (rollback budget + 45s) so a hung bring-up (a stuck
+  xray-core fetch or a verify that never passes) can't stall the shared health
+  goroutine. Interactive activations stay unbounded. Unit-tested (`sleepCtx`,
+  verify-on-cancel).
+- [~] **CLI parity — failover** (`feat(cli)` 5d2ee2e). `keen-manager failover
+  show|on|off|chain|interval|threshold|autoreturn|probe`; `chain` is validated
+  against the configured connections (+ the `direct` sentinel). Pure
+  `NormalizeFailoverChain`, unit-tested. **Structured-nfqws CLI still TODO.**
+- [ ] **P0 on-device (carried, unchanged) — the gate for a true stable
+  `v0.1.0`:** exact Proxy RCI shape + the "use for internet" flag read-back,
+  and the tpws feed/desync validation. Both need the live router (HANDOFF §0);
+  unreachable from the sandbox. Shipped `v0.1.0-rc.1` as the beta→stable bridge
+  (believed feature-complete, pending this validation).
+
+---
+
 ## Session 10 — nfqws as a routable interface via tpws (P1)
 
 - [~] **DPI bypass exposed as ONE routable KeeneticOS Proxy interface**
@@ -308,10 +350,10 @@ validation items below.
 
 ## P2 — robustness & parity / надёжность и паритет
 
-- [ ] Per-attempt timeout around `Activate()` inside the failover loop so one
-  hanging bring-up can't stall the shared health goroutine.
-- [ ] Backoff/jitter when the whole failover chain is down (stop hammering every
-  server every tick).
+- [x] Per-attempt timeout around `Activate()` inside the failover loop so one
+  hanging bring-up can't stall the shared health goroutine. (session 11, efb9d4c)
+- [x] Backoff/jitter when the whole failover chain is down (stop hammering every
+  server every tick). (session 11, aaeba95)
 - [ ] Through-tunnel reachability for chain nodes (not just TCP/handshake) before
   selecting them.
 - [ ] nfqws2 parity: arbitrary list/lua/log file management, self-update /
@@ -319,14 +361,15 @@ validation items below.
   is installed and fires.
 - [ ] hysteria2 / tuic subscription protocols (model + Xray outbound) — not used
   by BlancVPN / 3x-ui today, so lower priority.
-- [ ] Honour `RollbackTimeoutS == 0` explicitly (currently silently 90s).
-- [ ] Single-instance guard (pidfile/flock) around `state.json`.
+- [x] Honour `RollbackTimeoutS == 0` explicitly (was silently 90s). (session 11, 7354bc8)
+- [x] Single-instance guard (pidfile/flock) around `state.json`. (session 11, 9dcf293)
 
 ## P3 — polish / релиз
 
 - [ ] Dashboard: live traffic counters, quick connection switcher, native-AWG2
   capability badge (firmware is already detected).
-- [ ] CLI parity for structured nfqws config + failover editing.
+- [~] CLI parity for structured nfqws config + failover editing. (failover done
+  session 11, 5d2ee2e; structured nfqws still TODO)
 - [ ] Commit a freshly built embedded bundle for `go build`-from-source users
   (CI already rebuilds it on release).
 
