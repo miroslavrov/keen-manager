@@ -59,6 +59,14 @@ AWG2).
   tunnel carries traffic; (b) a route on the Xray connection sends only those
   services through it while the rest stays direct; (c) switching AWG locations
   leaves exactly one `WireguardN` on the router.
+- [ ] **🔴 NEXT (top priority): Xray as a single KeeneticOS "Proxy connection".**
+  The user's real goal — an Xray subscription should appear as ONE visible,
+  stable connection in the router UI whose parameters change under the hood on
+  server switch (not invisible TPROXY). KeeneticOS "Proxy client" (SOCKS5,
+  interface type `Proxy`) is exactly this: register one `ProxyN` → keen-manager's
+  local Xray SOCKS inbound `127.0.0.1:10808`; server switch rewrites only the
+  Xray config; routes bind to `ProxyN` via the same dns-proxy stack as AWG. Full
+  design, CLI/RCI contract, slices and validation in **`docs/XRAY-PROXY-PLAN.md`**.
 
 ---
 
