@@ -12,7 +12,8 @@
 # Environment overrides:
 #   REPO          GitHub owner/repo            (default miroslavrov/keen-manager)
 #   KEEN_VERSION  release tag to install       (default: latest)
-#   KEEN_URL      full URL to the .gz binary   (overrides REPO/KEEN_VERSION/ARCH)
+#   KEEN_URL      URL or local path to the .gz (overrides REPO/KEEN_VERSION/ARCH;
+#                 accepts https://…, a file:///abs/path, or a plain /abs/path)
 #   KEEN_ARCH     force arch (mipsle|mips|arm64|arm), skip detection
 #   KEEN_PORT     web UI port to print         (default 47115)
 
@@ -51,13 +52,26 @@ else
 fi
 
 # download <url> <dest> — writes to <dest>, returns non-zero on failure.
+# Accepts remote URLs (http/https) AND local sources, so an air-gapped or
+# DPI-blocked router can install from a binary copied over SSH: KEEN_URL may be a
+# file:// URL or a plain local path, in which case we copy it (no network used).
 download() {
 	_url="$1"; _dest="$2"
-	if [ "$DL" = "curl" ]; then
-		curl -fsSL "$_url" -o "$_dest"
-	else
-		wget -q -O "$_dest" "$_url"
-	fi
+	case "$_url" in
+		file://*)
+			_src=${_url#file://}
+			[ -f "$_src" ] || { err "local file not found: ${_src}"; return 1; }
+			cp "$_src" "$_dest" ;;
+		/*|./*|../*)
+			[ -f "$_url" ] || { err "local file not found: ${_url}"; return 1; }
+			cp "$_url" "$_dest" ;;
+		*)
+			if [ "$DL" = "curl" ]; then
+				curl -fsSL --connect-timeout 20 --retry 3 --retry-delay 2 "$_url" -o "$_dest"
+			else
+				wget -q -T 20 -O "$_dest" "$_url"
+			fi ;;
+	esac
 }
 
 # --- Arch detection (mirrors internal/platform/arch.go) ---------------------
