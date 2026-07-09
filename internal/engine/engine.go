@@ -77,6 +77,11 @@ type Engine struct {
 	foMu   sync.Mutex
 	foFail int // consecutive failover probe failures
 	nfFail int // consecutive nfqws-guard unhealthy observations
+	// Failover backoff: when the whole chain is unreachable, attempts are spaced
+	// by an exponential-with-jitter window instead of retried every tick, so a
+	// full outage doesn't hammer every server. Reset on switch/recovery.
+	foBackoffStreak int
+	foBackoffUntil  time.Time
 
 	startTime time.Time
 

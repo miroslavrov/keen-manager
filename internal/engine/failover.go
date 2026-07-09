@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/miroslavrov/keen-manager/internal/health"
@@ -48,6 +49,7 @@ func (e *Engine) SaveFailover(in model.Failover) error {
 		return err
 	}
 	e.foResetFail()
+	e.foResetBackoff()
 	e.Logf("failover config saved (enabled=%v, chain=%d nodes)", in.Enabled, len(in.Chain))
 	e.publishState()
 	return nil
@@ -97,6 +99,7 @@ func (e *Engine) failoverTick() {
 
 	if e.activeHealthy(st) {
 		e.foResetFail()
+		e.foResetBackoff()
 		if fo.AutoReturn {
 			e.maybeAutoReturn(st)
 		}
@@ -107,7 +110,80 @@ func (e *Engine) failoverTick() {
 		e.Logf("failover: active unhealthy (%d/%d)", n, fo.FailureThreshold)
 		return
 	}
-	e.failToNext(st, "active connection failed the health probe")
+	// Past the threshold we want to switch. When the whole chain is unreachable,
+	// failToNext can't switch anything — so instead of re-probing every server on
+	// every tick (which hammers them and can trip server-side rate limits),
+	// respect an exponential-with-jitter backoff window between attempts. The
+	// window is cleared the instant we switch or the active recovers.
+	if e.inBackoff(time.Now()) {
+		return
+	}
+	if e.failToNext(st, "active connection failed the health probe") {
+		e.foResetBackoff()
+	} else {
+		d := e.bumpBackoff()
+		e.Logf("failover: no reachable node in the chain; backing off ~%s before retrying", d.Round(time.Second))
+	}
+}
+
+// Failover backoff bounds. When the whole chain is down, attempts are spaced by
+// base*2^(streak-1) capped at max, with jitter (see backoffDelay).
+const (
+	foBackoffBase = 30 * time.Second
+	foBackoffMax  = 5 * time.Minute
+)
+
+// backoffDelay is the wait before the next failover attempt for a 1-based
+// consecutive-failure streak: an exponential backoff (base doubling) clamped to
+// max, with "full jitter" via frac in [0,1) so the result lands in [d/2, d].
+// Pure (no engine state, injected randomness) so it is unit-tested directly.
+func backoffDelay(streak int, base, max time.Duration, frac float64) time.Duration {
+	if streak < 1 {
+		streak = 1
+	}
+	d := base
+	for i := 1; i < streak; i++ {
+		d *= 2
+		if d >= max {
+			d = max
+			break
+		}
+	}
+	if d > max {
+		d = max
+	}
+	if frac < 0 {
+		frac = 0
+	} else if frac >= 1 {
+		frac = 0.999999
+	}
+	return d/2 + time.Duration(float64(d/2)*frac)
+}
+
+// inBackoff reports whether we are still inside the current backoff window.
+func (e *Engine) inBackoff(now time.Time) bool {
+	e.foMu.Lock()
+	defer e.foMu.Unlock()
+	return now.Before(e.foBackoffUntil)
+}
+
+// bumpBackoff grows the failure streak and arms the next backoff window,
+// returning the chosen delay (for logging).
+func (e *Engine) bumpBackoff() time.Duration {
+	e.foMu.Lock()
+	defer e.foMu.Unlock()
+	e.foBackoffStreak++
+	d := backoffDelay(e.foBackoffStreak, foBackoffBase, foBackoffMax, rand.Float64())
+	e.foBackoffUntil = time.Now().Add(d)
+	return d
+}
+
+// foResetBackoff clears the backoff window and streak (on switch/recovery).
+func (e *Engine) foResetBackoff() {
+	e.foMu.Lock()
+	e.foBackoffStreak = 0
+	e.foBackoffUntil = time.Time{}
+	e.foMu.Unlock()
 }
 
 // activeHealthy reports whether the active connection currently passes an
@@ -124,8 +200,11 @@ func (e *Engine) activeHealthy(st model.State) bool {
 }
 
 // failToNext advances to the next reachable node after the active one in the
-// chain (the last node may be "direct").
-func (e *Engine) failToNext(st model.State, reason string) {
+// chain (the last node may be "direct"). It returns true when it actually
+// switched the active path (activated a node, dropped to direct, or used a
+// per-connection fallback), and false when nothing reachable was found — the
+// caller uses that to drive the outage backoff.
+func (e *Engine) failToNext(st model.State, reason string) bool {
 	fo := st.Failover
 	start := indexOf(fo.Chain, st.ActiveConnID)
 	from := st.ActiveConnID
@@ -135,7 +214,7 @@ func (e *Engine) failToNext(st model.State, reason string) {
 		if node == DirectNode {
 			e.goDirect(from, "chain exhausted — "+reason)
 			e.setCurrentIndex(i)
-			return
+			return true
 		}
 		if e.nodeReachable(node) {
 			if err := e.Activate(node); err != nil {
@@ -145,7 +224,7 @@ func (e *Engine) failToNext(st model.State, reason string) {
 			e.recordFailover(from, node, reason)
 			e.setCurrentIndex(i)
 			e.foResetFail()
-			return
+			return true
 		}
 	}
 
@@ -154,9 +233,10 @@ func (e *Engine) failToNext(st model.State, reason string) {
 	// user can pin a specific safety net per connection without maintaining the
 	// global chain.
 	if e.failToConnFallback(from, reason) {
-		return
+		return true
 	}
 	e.Logf("failover: no reachable node after current; leaving as-is")
+	return false
 }
 
 // activeHasFallback reports whether the active connection defines a
