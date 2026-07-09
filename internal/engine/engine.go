@@ -21,6 +21,7 @@ import (
 	"github.com/miroslavrov/keen-manager/internal/nfqws"
 	"github.com/miroslavrov/keen-manager/internal/platform"
 	"github.com/miroslavrov/keen-manager/internal/route"
+	"github.com/miroslavrov/keen-manager/internal/tpws"
 	"github.com/miroslavrov/keen-manager/internal/version"
 	"github.com/miroslavrov/keen-manager/internal/xray"
 )
@@ -46,6 +47,7 @@ type Engine struct {
 	xray  *xray.Controller
 	awg   *awg.Controller
 	nfqws *nfqws.Controller
+	tpws  *tpws.Controller
 	route *route.Manager
 
 	// keenetic is the RCI client for the native AWG2 path; caps records what
@@ -59,6 +61,12 @@ type Engine struct {
 	// Cleared when the user explicitly changes the XrayIntegration setting.
 	// Guarded by mu.
 	proxyClientDown bool
+
+	// bypassClientDown latches true once registering the DPI-bypass Proxy
+	// interface (tpws exit point) has been rejected this session, so the engine
+	// stops retrying the device write and surfaces a hint instead. Cleared when
+	// the user toggles the bypass feature. Guarded by mu.
+	bypassClientDown bool
 
 	mu      sync.RWMutex
 	runtime map[string]*model.RuntimeStatus // per-connection health, by conn ID
@@ -107,6 +115,7 @@ func New(paths platform.Paths, dryRun bool) (*Engine, error) {
 		xray:      xray.NewController(paths, runner),
 		awg:       awg.NewController(paths, runner),
 		nfqws:     nfqws.NewController(paths, runner),
+		tpws:      tpws.NewController(paths, runner),
 		route:     route.New(paths, runner),
 		keenetic:  keenetic.New(""),
 		runtime:   map[string]*model.RuntimeStatus{},
@@ -139,7 +148,10 @@ func (e *Engine) Start(ctx context.Context) {
 		case <-time.After(3 * time.Second): // let the WAN settle first
 		}
 		e.reconcile()
-		// Re-apply any service routes whose target tunnel is back up.
+		// Re-establish the DPI-bypass exit point (tpws + its managed Proxy
+		// interface) if the feature was on before the restart, then re-apply any
+		// service routes whose target tunnel/interface is back up.
+		e.reconcileBypass()
 		e.reconcileRoutes()
 	}()
 }

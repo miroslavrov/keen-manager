@@ -76,6 +76,21 @@ func (e *Engine) routeView(st model.State, r model.ServiceRoute) RouteView {
 		return v
 	}
 
+	// Reserved DPI-bypass target: the route binds to the managed tpws Proxy
+	// interface (a shared exit point, not a keen-manager connection).
+	if r.TargetConnID == bypassTargetID {
+		v.TargetName = "DPI Bypass"
+		if iface, ok := e.resolveRouteIface(r); ok {
+			v.TargetIface = iface
+		} else if r.Enabled {
+			v.Note = "enable DPI Bypass on the Bypass page to route these domains through it"
+		}
+		if r.Enabled && !e.dnsRoutingAvailable() {
+			v.Note = "firmware has no native DNS routing (needs KeeneticOS 5.x)"
+		}
+		return v
+	}
+
 	if c, ok := findConn(st, r.TargetConnID); ok {
 		v.TargetName = c.Name
 	}
@@ -132,6 +147,14 @@ func (e *Engine) resolveRouteIface(r model.ServiceRoute) (string, bool) {
 	if name := strings.TrimSpace(r.TargetIface); name != "" {
 		return name, true
 	}
+	// Reserved DPI-bypass target → the managed tpws Proxy interface, once it
+	// exists (the bypass feature must be enabled first).
+	if r.TargetConnID == bypassTargetID {
+		if p := e.managedBypassIface(); p != "" {
+			return p, true
+		}
+		return "", false
+	}
 	if e.xrayProxyMode() {
 		st := e.store.Get()
 		if c, ok := findConn(st, r.TargetConnID); ok && c.Type == model.ConnXray {
@@ -160,7 +183,7 @@ func (e *Engine) CreateRoute(name, presetID string, domains, subnets []string, t
 	if targetConnID == "" && targetIface == "" {
 		return RouteView{}, fmt.Errorf("a route needs a target interface or connection")
 	}
-	if targetConnID != "" {
+	if targetConnID != "" && targetConnID != bypassTargetID {
 		if _, ok := findConn(st, targetConnID); !ok {
 			return RouteView{}, fmt.Errorf("target connection %s not found", targetConnID)
 		}
@@ -275,7 +298,7 @@ func (e *Engine) UpdateRoute(id, name string, domains, subnets []string, targetC
 	if targetConnID == "" && targetIface == "" {
 		targetConnID, targetIface = old.TargetConnID, old.TargetIface
 	}
-	if targetConnID != "" {
+	if targetConnID != "" && targetConnID != bypassTargetID {
 		if _, ok := findConn(st, targetConnID); !ok {
 			return RouteView{}, fmt.Errorf("target connection %s not found", targetConnID)
 		}

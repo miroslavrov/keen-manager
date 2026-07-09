@@ -69,6 +69,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/nfqws/lists/{name}", s.requireAuth(s.handleSaveNfqwsList))
 	mux.HandleFunc("POST /api/nfqws/check-domain", s.requireAuth(s.handleCheckDomain))
 
+	// DPI bypass as a routable interface (tpws → managed Proxy connection).
+	mux.HandleFunc("GET /api/bypass", s.requireAuth(s.handleBypass))
+	mux.HandleFunc("PUT /api/bypass", s.requireAuth(s.handleSaveBypass))
+
 	// Failover.
 	mux.HandleFunc("GET /api/failover", s.requireAuth(s.handleFailover))
 	mux.HandleFunc("PUT /api/failover", s.requireAuth(s.handleSaveFailover))
@@ -487,6 +491,25 @@ func (s *Server) handleCheckDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.eng.CheckDomain(body.Domain))
+}
+
+// ----- DPI bypass (routable tpws interface) -----
+
+func (s *Server) handleBypass(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.eng.Bypass())
+}
+
+func (s *Server) handleSaveBypass(w http.ResponseWriter, r *http.Request) {
+	var fields map[string]any
+	if err := readJSON(r, &fields); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := s.eng.SaveBypass(fields); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.eng.Bypass())
 }
 
 // ----- failover -----

@@ -217,6 +217,30 @@ type Failover struct {
 	NfqwsProbeDomains []string `json:"nfqws_probe_domains,omitempty"`
 }
 
+// Bypass configures the DPI-bypass "routable interface" feature: keen-manager
+// runs a local tpws (zapret's socket-level desync proxy) as a SOCKS server on
+// 127.0.0.1:Port and registers ONE managed KeeneticOS Proxy interface pointing
+// at it (State.ManagedBypassIface). Chosen domains are then routed through it
+// per-service from the Routes page — exactly like a VPN tunnel — instead of a
+// global inline NFQUEUE. The desync Strategy lives here (edited on the Bypass
+// page → Advanced); the domain selection is Routes (a route targeting the
+// reserved "bypass" target), so there is a single source of truth for domains.
+type Bypass struct {
+	// Enabled turns the routable bypass interface on: start tpws + register the
+	// managed Proxy interface. Off stops tpws and retires the interface.
+	Enabled bool `json:"enabled"`
+	// Port is the local tpws SOCKS port (0 → the tpws package default, 10809;
+	// distinct from the Xray SOCKS inbound on 10808 so both can coexist).
+	Port int `json:"port,omitempty"`
+	// Strategy is the free-form tpws desync argument string. It is device- and
+	// ISP-specific and tuned on-device; empty means the tpws package default.
+	Strategy string `json:"strategy,omitempty"`
+	// Seeded records that the default Discord + YouTube routes (from the preset
+	// catalog) were created once on first enable, so re-enabling doesn't
+	// duplicate them and the user can freely delete them.
+	Seeded bool `json:"seeded,omitempty"`
+}
+
 // Platform captures detected device facts (read-only, filled at runtime).
 type Platform struct {
 	Arch        string `json:"arch"`         // mipsle | mips | arm64 | ...
@@ -259,6 +283,7 @@ type State struct {
 	Routes        []ServiceRoute `json:"routes,omitempty"`
 	Failover      Failover       `json:"failover"`
 	Settings      Settings       `json:"settings"`
+	Bypass        Bypass         `json:"bypass"`
 	ActiveConnID  string         `json:"active_conn_id"`
 	KillSwitch    bool           `json:"kill_switch"`
 	Version       int            `json:"schema_version"`
@@ -279,6 +304,16 @@ type State struct {
 	// reconciled or torn down after a restart. Only set on the native
 	// Proxy-connection path (not the TPROXY fallback).
 	ManagedProxyIface string `json:"managed_proxy_iface,omitempty"`
+
+	// ManagedBypassIface is the single KeeneticOS "Proxy" interface keen-manager
+	// registers for the DPI-bypass exit point: ProxyN → the local tpws SOCKS
+	// listener (127.0.0.1:Bypass.Port). It is the exact analogue of
+	// ManagedProxyIface but for the tpws desync proxy rather than Xray, and is
+	// governed by the same anti-loop rule (never marked "use for internet
+	// access" — it is a per-domain routing target only). Empty until the bypass
+	// feature is first enabled; persisted so it can be reconciled/torn down after
+	// a restart.
+	ManagedBypassIface string `json:"managed_bypass_iface,omitempty"`
 }
 
 // NfqwsStatusView is the UI-facing status of the nfqws2 service.

@@ -265,6 +265,35 @@ type NfqwsImportView struct {
 	Sources   []string            `json:"sources"`
 }
 
+// BypassView is GET /api/bypass: the routable DPI-bypass feature status. tpws
+// (zapret's socket desync proxy) is exposed as one managed KeeneticOS Proxy
+// interface; domains are routed through it per-service from the Routes page
+// (target "bypass"), like a VPN tunnel, instead of a global inline NFQUEUE.
+type BypassView struct {
+	// Enabled is the user's on/off switch for the feature.
+	Enabled bool `json:"enabled"`
+	// Installed reports whether the tpws binary is present on the device.
+	Installed bool `json:"installed"`
+	// Running reports whether the tpws daemon is currently active (best-effort;
+	// always false in dry-run / off-device).
+	Running bool `json:"running"`
+	// Interface is the managed Proxy interface name (e.g. "Proxy1") once
+	// registered; empty until the feature is enabled on-device.
+	Interface string `json:"interface,omitempty"`
+	// Port is the local tpws SOCKS port the Proxy interface points at.
+	Port int `json:"port"`
+	// Strategy is the tpws desync argument string (edited on the Bypass page).
+	Strategy string `json:"strategy"`
+	// Routable reports whether a route can currently bind to the bypass exit
+	// point (true once the managed Proxy interface exists).
+	Routable bool `json:"routable"`
+	// Target is the reserved Routes target id for the bypass interface
+	// ("bypass") the picker uses.
+	Target string `json:"target"`
+	// Note is a human explanation of the current state / next step.
+	Note string `json:"note,omitempty"`
+}
+
 // DomainCheckView is the domain-reachability probe result.
 type DomainCheckView struct {
 	Domain   string `json:"domain"`
