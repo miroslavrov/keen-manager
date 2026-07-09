@@ -34,11 +34,40 @@ func statusStr(s model.Status) string {
 
 // HealthView is GET /api/health.
 type HealthView struct {
-	Status        string `json:"status"`
-	Version       string `json:"version"`
-	Arch          string `json:"arch"`
-	OS            string `json:"os"`
-	UptimeSeconds int64  `json:"uptime_seconds"`
+	Status        string           `json:"status"`
+	Version       string           `json:"version"`
+	Arch          string           `json:"arch"`
+	OS            string           `json:"os"`
+	UptimeSeconds int64            `json:"uptime_seconds"`
+	Capabilities  CapabilitiesView `json:"capabilities"`
+}
+
+// CapabilitiesView reports what the detected KeeneticOS firmware supports, so
+// the dashboard can badge native AWG2 / WireGuard / Proxy-client / DNS-routing
+// availability instead of leaving the user guessing why a path is unavailable.
+type CapabilitiesView struct {
+	Firmware    string `json:"firmware,omitempty"`
+	NativeAWG2  bool   `json:"native_awg2"`
+	Wireguard   bool   `json:"wireguard"`
+	ProxyClient bool   `json:"proxy_client"`
+	DNSRoute    bool   `json:"dns_route"`
+}
+
+// TrafficView is a point-in-time snapshot of per-interface byte counters
+// (cumulative since boot, from /proc/net/dev), for the dashboard's live
+// throughput readout. The backend stays stateless — the UI diffs successive
+// snapshots to derive rates — and matches a row to the WAN by the interface
+// name already reported in StateView.Wan.
+type TrafficView struct {
+	At         string             `json:"at"`
+	Interfaces []IfaceTrafficView `json:"interfaces"`
+}
+
+// IfaceTrafficView is one interface's cumulative receive/transmit byte counters.
+type IfaceTrafficView struct {
+	Name    string `json:"name"`
+	RxBytes int64  `json:"rx_bytes"`
+	TxBytes int64  `json:"tx_bytes"`
 }
 
 // AuthStateView is GET /api/auth.

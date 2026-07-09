@@ -238,6 +238,13 @@ func (e *Engine) Health() HealthView {
 		Arch:          e.Platform.Arch,
 		OS:            firstNonEmpty(e.Platform.OSVersion, "unknown"),
 		UptimeSeconds: int64(time.Since(e.startTime).Seconds()),
+		Capabilities: CapabilitiesView{
+			Firmware:    firstNonEmpty(e.caps.Release, e.Platform.OSVersion),
+			NativeAWG2:  e.caps.SupportsAWG2,
+			Wireguard:   e.caps.HasWireguard,
+			ProxyClient: e.caps.HasProxyClient,
+			DNSRoute:    e.caps.SupportsDNSRoute,
+		},
 	}
 }
 

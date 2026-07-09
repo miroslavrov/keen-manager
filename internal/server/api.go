@@ -23,6 +23,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Aggregate.
 	mux.HandleFunc("GET /api/state", s.requireAuth(s.handleState))
+	mux.HandleFunc("GET /api/traffic", s.requireAuth(s.handleTraffic))
 
 	// Connections.
 	mux.HandleFunc("GET /api/connections", s.requireAuth(s.handleConnections))
@@ -99,6 +100,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.eng.State())
+}
+
+func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.eng.Traffic())
 }
 
 // ----- connections -----
