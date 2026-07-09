@@ -78,14 +78,19 @@ func (e *Engine) Activate(id string) error {
 	e.publishState()
 	go e.probeOne(id)
 	// Re-apply enabled-but-pending service routes that were waiting on this
-	// connection. AWG routes needed the native interface that now exists; Xray
-	// routes were compiled into the config bringUp just applied, so they are
-	// already live and only need marking.
+	// connection. AWG routes (and, in proxy-connection mode, Xray routes) need
+	// the native/Proxy interface that now exists, so reconcile them onto the
+	// router's dns-proxy stack. In TPROXY mode Xray routes were compiled into the
+	// config bringUp just applied, so they are already live and only need marking.
 	switch c.Type {
 	case model.ConnAWG:
 		go e.reconcileRoutes()
 	case model.ConnXray:
-		e.markActiveXrayRoutesApplied(c.ID)
+		if e.xrayProxyMode() {
+			go e.reconcileRoutes()
+		} else {
+			e.markActiveXrayRoutesApplied(c.ID)
+		}
 	}
 	return nil
 }
@@ -155,6 +160,11 @@ func (e *Engine) bringUp(c model.Connection) error {
 		if err != nil {
 			return fmt.Errorf("xray-core not available: %w", err)
 		}
+		// Proxy-connection mode: apply the SOCKS-only config and register the
+		// single managed ProxyN exit point (falls back to TPROXY on rejection).
+		if e.xrayProxyMode() {
+			return e.bringUpXrayProxy(c.ID, srv)
+		}
 		cfg, err := e.buildActiveXray(c.ID, srv, "")
 		if err != nil {
 			return err
@@ -177,7 +187,12 @@ func (e *Engine) bringDown(c model.Connection) error {
 		return e.awg.Down(awgIface(c.ID))
 	case model.ConnXray:
 		// Release TPROXY capture first so traffic is never sent to a dead proxy.
-		_ = e.route.DisableTProxy()
+		// In proxy-connection mode there is no capture to release, and the shared
+		// ProxyN exit point is intentionally left in place (routes survive; it is
+		// only removed when the last Xray connection is deleted).
+		if !e.xrayProxyMode() {
+			_ = e.route.DisableTProxy()
+		}
 		return e.xray.Stop()
 	}
 	return nil
@@ -187,7 +202,13 @@ func (e *Engine) bringDown(c model.Connection) error {
 func (e *Engine) applyRouting(c model.Connection) error {
 	switch c.Type {
 	case model.ConnXray:
-		if err := e.route.EnableTProxy(); err != nil {
+		if e.xrayProxyMode() {
+			// Native routing: traffic reaches the tunnel via a dns-proxy route on
+			// ProxyN (applied per-route), so there is nothing to capture here. Make
+			// the exit point eligible for the default route (best-effort) so it can
+			// also serve as a primary connection in a Keenetic policy.
+			e.markProxyGlobalBestEffort()
+		} else if err := e.route.EnableTProxy(); err != nil {
 			return err
 		}
 	case model.ConnAWG:
@@ -201,7 +222,9 @@ func (e *Engine) applyRouting(c model.Connection) error {
 
 // revertRouting tears down capture rules (idempotent).
 func (e *Engine) revertRouting(c model.Connection) {
-	if c.Type == model.ConnXray {
+	// Only the TPROXY path installs capture rules; proxy-connection mode routes
+	// natively and leaves the shared ProxyN in place.
+	if c.Type == model.ConnXray && !e.xrayProxyMode() {
 		_ = e.route.DisableTProxy()
 	}
 	_ = e.route.DisableKillSwitch()
@@ -282,26 +305,35 @@ func (e *Engine) setActive(id string) error {
 	return e.store.Mutate(func(s *model.State) error { s.ActiveConnID = id; return nil })
 }
 
-// buildActiveXray produces the config for the single active Xray connection:
-// a local SOCKS inbound (LAN proxy + probe target) plus a TPROXY inbound for
-// transparent capture. Outbounds carry SO_MARK 255 so Xray's own egress is not
-// re-captured (route.Manager excludes that mark).
+// buildActiveXray produces the config for the single active Xray connection.
 //
-// When one or more enabled service routes target this connection, their domains
-// and subnets are compiled into per-service (split-tunnel) routing so only those
+// In proxy-connection mode it is the minimal SOCKS-only profile
+// (Options.ProxyConnMode): the router routes to the managed ProxyN interface
+// via dns-proxy, so there is no TPROXY capture and no in-Xray split — a full
+// tunnel through the pinned server is correct.
+//
+// In TPROXY mode it carries a local SOCKS inbound (LAN proxy + probe target)
+// plus a TPROXY inbound for transparent capture; outbounds carry SO_MARK 255 so
+// Xray's own egress is not re-captured (route.Manager excludes that mark). When
+// one or more enabled service routes target this connection, their domains and
+// subnets are compiled into per-service (split-tunnel) routing so only those
 // services egress through the server and the rest goes direct. excludeRouteID
 // lets a teardown rebuild the config without a route that is still present in
 // state (DeleteRoute/SetRouteEnabled tear down before/while mutating state).
 func (e *Engine) buildActiveXray(connID string, server model.Server, excludeRouteID string) (*xray.Config, error) {
 	opts := xray.Defaults()
 	opts.SocksPort = xraySocksPort
-	opts.EnableTProxy = true
-	opts.TProxyPort = e.route.TProxyPort
 	opts.EnableBalancer = false
 	if pt := e.probeTarget(); pt != "" {
 		opts.ProbeURL = pt
 		opts.PingDestination = pt
 	}
+	if e.xrayProxyMode() {
+		opts.ProxyConnMode = true
+		return xray.BuildConfig([]model.Server{server}, opts)
+	}
+	opts.EnableTProxy = true
+	opts.TProxyPort = e.route.TProxyPort
 	opts.SplitDomains, opts.SplitSubnets = e.xrayRouteMembership(connID, excludeRouteID)
 	return xray.BuildConfig([]model.Server{server}, opts)
 }

@@ -79,7 +79,8 @@ type ConnDetailView struct {
 // WireguardN interfaces (visible, assignable to a policy); Xray connections
 // capture traffic transparently and are intentionally invisible as interfaces.
 type IntegrationView struct {
-	// Mode is one of: "native-interface", "userspace-awg", "transparent-proxy".
+	// Mode is one of: "native-interface", "userspace-awg", "keenetic-proxy",
+	// "transparent-proxy".
 	Mode string `json:"mode"`
 	// VisibleInRouter reports whether this connection shows up as an interface
 	// in the Keenetic web UI.
@@ -113,8 +114,11 @@ type InterfaceView struct {
 	Security    string `json:"security,omitempty"`
 	// IsWireguard marks native WireGuard/AmneziaWG interfaces.
 	IsWireguard bool `json:"is_wireguard"`
+	// IsProxy marks KeeneticOS "Proxy" interfaces (Proxy client component) —
+	// including the one keen-manager registers for the Xray exit point.
+	IsProxy bool `json:"is_proxy"`
 	// Routable reports whether this interface can back a Routes dns-proxy route
-	// (a WireGuard interface that is not the router's own VPN server).
+	// (a WireGuard or Proxy interface that is not the router's own VPN server).
 	Routable bool `json:"routable"`
 	// ManagedConnID is the keen-manager connection that created this interface
 	// (via native AWG import), when applicable — lets the UI tie a router
@@ -276,7 +280,9 @@ type SettingsView struct {
 	RollbackTimeoutS      int          `json:"rollback_timeout_s"`
 	KillSwitchDefault     bool         `json:"kill_switch_default"`
 	AutoSelectIntervalMin int          `json:"auto_select_interval_min"`
-	Platform              PlatformView `json:"platform"`
+	// XrayIntegration is "auto" | "proxy" | "tproxy" (see model.Settings).
+	XrayIntegration string       `json:"xray_integration"`
+	Platform        PlatformView `json:"platform"`
 }
 
 // LogView is GET /api/logs.

@@ -63,10 +63,12 @@ func (e *Engine) routeView(st model.State, r model.ServiceRoute) RouteView {
 		Enabled:      r.Enabled,
 		Applied:      r.Applied,
 	}
-	// Xray target: per-service ("split tunnel") routing happens inside the local
-	// Xray instance, so there is no router interface and no DNS-routing
-	// requirement. The route is live whenever its Xray connection is active.
-	if c, ok := e.routeIsXray(st, r); ok {
+	// TPROXY mode only: per-service ("split tunnel") routing happens inside the
+	// local Xray instance, so there is no router interface and no DNS-routing
+	// requirement. The route is live whenever its Xray connection is active. In
+	// proxy-connection mode an Xray route binds to the managed ProxyN like an
+	// AWG route (handled by the generic branch below).
+	if c, ok := e.routeUsesXraySplit(st, r); ok {
 		v.TargetName = c.Name
 		if r.Enabled && st.ActiveConnID != c.ID {
 			v.Note = "applies when the Xray connection \"" + c.Name + "\" is the active tunnel"
@@ -84,7 +86,11 @@ func (e *Engine) routeView(st model.State, r model.ServiceRoute) RouteView {
 			v.TargetName = iface
 		}
 	} else if r.Enabled {
-		v.Note = "target has no native interface yet — activate its AmneziaWG connection"
+		if c, ok := findConn(st, r.TargetConnID); ok && c.Type == model.ConnXray {
+			v.Note = "activate an Xray connection to create the Proxy interface"
+		} else {
+			v.Note = "target has no native interface yet — activate its AmneziaWG connection"
+		}
 	}
 	if r.Enabled && !e.dnsRoutingAvailable() {
 		v.Note = "firmware has no native DNS routing (needs KeeneticOS 5.x)"
@@ -92,11 +98,9 @@ func (e *Engine) routeView(st model.State, r model.ServiceRoute) RouteView {
 	return v
 }
 
-// routeIsXray reports whether a route targets an Xray connection (by
-// TargetConnID, with no interface override). Such routes are applied by
-// compiling their domains/subnets into the active Xray config rather than via
-// the router's dns-proxy stack.
-func (e *Engine) routeIsXray(st model.State, r model.ServiceRoute) (model.Connection, bool) {
+// routeTargetsXray reports whether a route targets an Xray connection (by
+// TargetConnID, with no interface override).
+func (e *Engine) routeTargetsXray(st model.State, r model.ServiceRoute) (model.Connection, bool) {
 	if strings.TrimSpace(r.TargetIface) != "" || r.TargetConnID == "" {
 		return model.Connection{}, false
 	}
@@ -106,13 +110,36 @@ func (e *Engine) routeIsXray(st model.State, r model.ServiceRoute) (model.Connec
 	return model.Connection{}, false
 }
 
+// routeUsesXraySplit reports whether a route should be applied by compiling it
+// into the active Xray config (the in-Xray "split tunnel"). That is TPROXY-mode
+// behaviour only: in proxy-connection mode an Xray-targeted route is a normal
+// dns-proxy route bound to the shared managed ProxyN (one exit point), so it
+// goes through the same router-native path as AWG instead.
+func (e *Engine) routeUsesXraySplit(st model.State, r model.ServiceRoute) (model.Connection, bool) {
+	if e.xrayProxyMode() {
+		return model.Connection{}, false
+	}
+	return e.routeTargetsXray(st, r)
+}
+
 // resolveRouteIface returns the KeeneticOS interface name a route binds to.
-// A directly-pinned TargetIface wins; otherwise it resolves the target
-// connection's native interface. The bool is false when neither yields an
-// interface (e.g. a connection-targeted route whose AWG tunnel isn't up yet).
+// A directly-pinned TargetIface wins; a route targeting an Xray connection in
+// proxy-connection mode binds to the shared managed ProxyN (one exit point);
+// otherwise it resolves the target connection's native AWG interface. The bool
+// is false when none yields an interface yet (e.g. the AWG tunnel isn't up, or
+// no Xray connection has been activated so ProxyN doesn't exist).
 func (e *Engine) resolveRouteIface(r model.ServiceRoute) (string, bool) {
 	if name := strings.TrimSpace(r.TargetIface); name != "" {
 		return name, true
+	}
+	if e.xrayProxyMode() {
+		st := e.store.Get()
+		if c, ok := findConn(st, r.TargetConnID); ok && c.Type == model.ConnXray {
+			if p := e.managedProxyIface(); p != "" {
+				return p, true
+			}
+			return "", false
+		}
 	}
 	return e.nativeIface(r.TargetConnID)
 }
@@ -248,9 +275,11 @@ func (e *Engine) applyRoute(id string) error {
 	if !r.Enabled {
 		return nil
 	}
-	// Xray target: compile into the active Xray config instead of the router's
-	// dns-proxy stack (handles its own dry-run / not-active cases).
-	if _, ok := e.routeIsXray(e.store.Get(), r); ok {
+	// TPROXY mode: compile an Xray-targeted route into the active Xray config
+	// instead of the router's dns-proxy stack (handles its own dry-run /
+	// not-active cases). In proxy-connection mode this returns false and the
+	// route is applied to ProxyN via the dns-proxy path below, like an AWG route.
+	if _, ok := e.routeUsesXraySplit(e.store.Get(), r); ok {
 		return e.applyXrayRoute(r)
 	}
 	if e.runner.DryRun {
@@ -365,8 +394,9 @@ func (e *Engine) unapplyXrayRoute(r model.ServiceRoute) error {
 // unapplyRoute removes a route's object-groups + dns-proxy routes + subnet
 // routes from the router (best-effort, resilient to a downed target).
 func (e *Engine) unapplyRoute(r model.ServiceRoute) error {
-	// Xray-targeted routes are compiled into the Xray config, not the router.
-	if _, ok := e.routeIsXray(e.store.Get(), r); ok {
+	// TPROXY mode: an Xray-targeted route is compiled into the Xray config, not
+	// the router. Proxy-connection mode falls through to the dns-proxy teardown.
+	if _, ok := e.routeUsesXraySplit(e.store.Get(), r); ok {
 		return e.unapplyXrayRoute(r)
 	}
 	if e.runner.DryRun || e.keenetic == nil {

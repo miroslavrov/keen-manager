@@ -53,6 +53,13 @@ type Engine struct {
 	keenetic *keenetic.Client
 	caps     keenetic.Capabilities
 
+	// proxyClientDown latches true (for the process lifetime) once creating a
+	// KeeneticOS Proxy interface has been rejected, so xrayMode() stops
+	// attempting the proxy-connection path and uses the TPROXY fallback instead.
+	// Cleared when the user explicitly changes the XrayIntegration setting.
+	// Guarded by mu.
+	proxyClientDown bool
+
 	mu      sync.RWMutex
 	runtime map[string]*model.RuntimeStatus // per-connection health, by conn ID
 

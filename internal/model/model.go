@@ -240,6 +240,16 @@ type Settings struct {
 	KillSwitchDefault bool  `json:"kill_switch_default"`
 	// AutoSelectIntervalMin: how often to re-evaluate best location (0 = manual).
 	AutoSelectIntervalMin int `json:"auto_select_interval_min"`
+	// XrayIntegration selects how an active Xray connection is wired to the
+	// router:
+	//   ""/"auto" — use a KeeneticOS Proxy connection when the Proxy client
+	//               component is present, else TPROXY (the default);
+	//   "proxy"   — force the Proxy-connection path (one visible ProxyN → the
+	//               local Xray SOCKS inbound; per-service routing via dns-proxy);
+	//   "tproxy"  — force the legacy transparent-proxy capture (invisible in the
+	//               router UI, in-Xray split routing).
+	// See docs/XRAY-PROXY-PLAN.md.
+	XrayIntegration string `json:"xray_integration,omitempty"`
 }
 
 // State is the full persisted document.
@@ -259,6 +269,16 @@ type State struct {
 	// (firmware >= 5.01.A.3); absent for the Entware userspace (awg-quick) path.
 	// Persisted so the interface can be torn down or reconciled after a restart.
 	NativeIfaces map[string]string `json:"native_ifaces,omitempty"`
+
+	// ManagedProxyIface is the single KeeneticOS "Proxy" interface (e.g.
+	// "Proxy0") keen-manager registers for the Xray proxy-connection model:
+	// ProxyN → the local Xray SOCKS inbound (127.0.0.1:10808). It is shared by
+	// every Xray connection (there is one exit point); switching server only
+	// rewrites the Xray config, never this interface. Empty until the first
+	// Xray activation in proxy mode creates it; persisted so it can be
+	// reconciled or torn down after a restart. Only set on the native
+	// Proxy-connection path (not the TPROXY fallback).
+	ManagedProxyIface string `json:"managed_proxy_iface,omitempty"`
 }
 
 // NfqwsStatusView is the UI-facing status of the nfqws2 service.

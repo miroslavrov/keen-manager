@@ -116,10 +116,24 @@ func (e *Engine) integrationOf(c model.Connection) IntegrationView {
 			Summary:         "Runs as an Entware userspace tunnel (awg-quick). It is not shown in the Keenetic UI — native AmneziaWG needs KeeneticOS 5.1+.",
 		}
 	case model.ConnXray:
+		if e.xrayProxyMode() {
+			iv := IntegrationView{
+				Mode:            "keenetic-proxy",
+				VisibleInRouter: true,
+				RoutableTarget:  true,
+			}
+			if p := e.managedProxyIface(); p != "" {
+				iv.Interface = p
+				iv.Summary = "Shown in the Keenetic UI as Proxy connection " + p + " (Other Connections → Proxy). One stable connection to keen-manager's local Xray (SOCKS5); switching server rewrites the tunnel under the hood without touching this interface. Make it your primary connection in Connection Priorities, or send specific services through it from the Routes page."
+			} else {
+				iv.Summary = "Activate an Xray connection and it is registered as a single KeeneticOS Proxy connection (SOCKS5 → keen-manager's local Xray), visible in the router UI and usable as a Routes target."
+			}
+			return iv
+		}
 		return IntegrationView{
 			Mode:            "transparent-proxy",
 			VisibleInRouter: false,
-			Summary:         "vless/vmess connections run inside keen-manager's local Xray and capture traffic transparently (TPROXY). Nothing appears as a router interface — this is expected. Scope which traffic uses it with a kill switch or per-service rules.",
+			Summary:         "vless/vmess connections run inside keen-manager's local Xray and capture traffic transparently (TPROXY). Nothing appears as a router interface — this is expected. Scope which traffic uses it with a kill switch or per-service rules. Install the Proxy client component (and set Xray integration to Proxy) to expose it as one visible connection instead.",
 		}
 	}
 	return IntegrationView{Mode: "unknown", Summary: "Unknown connection type."}
@@ -278,6 +292,11 @@ func (e *Engine) DeleteConnection(id string) error {
 	}
 	e.vault.delete(id)
 	e.dropRuntime(id)
+	// If this was the last Xray connection, retire the shared managed Proxy
+	// interface (the single exit point) so keen-manager cleans up after itself.
+	if c.Type == model.ConnXray {
+		e.teardownManagedProxyIfaceIfUnused()
+	}
 	e.Logf("connection deleted: %s", c.Name)
 	e.publishState()
 	return nil

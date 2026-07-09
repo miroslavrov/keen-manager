@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/miroslavrov/keen-manager/internal/keenetic"
+	"github.com/miroslavrov/keen-manager/internal/model"
 )
 
 // Interfaces returns the router's interfaces as reported live by KeeneticOS
@@ -41,16 +42,39 @@ func (e *Engine) Interfaces() InterfacesView {
 
 	// Reverse-map the native interface name -> keen-manager connection id so a
 	// router interface can be tied back to the connection that created it.
+	st := e.store.Get()
 	byIface := map[string]string{}
-	for cid, name := range e.store.Get().NativeIfaces {
+	for cid, name := range st.NativeIfaces {
 		if name != "" {
 			byIface[name] = cid
+		}
+	}
+	// The shared managed Proxy interface (Xray exit point) maps back to the
+	// active Xray connection when one is active, else the first Xray connection.
+	managedProxy := e.managedProxyIface()
+	proxyConnID := ""
+	if managedProxy != "" {
+		if c, ok := findConn(st, st.ActiveConnID); ok && c.Type == model.ConnXray {
+			proxyConnID = c.ID
+		} else {
+			for _, c := range st.Connections {
+				if c.Type == model.ConnXray {
+					proxyConnID = c.ID
+					break
+				}
+			}
 		}
 	}
 
 	out := make([]InterfaceView, 0, len(infos))
 	for _, in := range infos {
-		routable := in.IsWireguard && !in.IsBuiltInVPNServer()
+		// Both native WireGuard and KeeneticOS Proxy interfaces can back a
+		// dns-proxy route (a Routes target); the router's own VPN server cannot.
+		routable := (in.IsWireguard || in.IsProxy) && !in.IsBuiltInVPNServer()
+		managedID := byIface[in.Name]
+		if managedID == "" && managedProxy != "" && in.Name == managedProxy {
+			managedID = proxyConnID
+		}
 		out = append(out, InterfaceView{
 			Name:          in.Name,
 			Label:         firstNonEmpty(strings.TrimSpace(in.Description), in.Name),
@@ -61,8 +85,9 @@ func (e *Engine) Interfaces() InterfacesView {
 			Address:       in.Address,
 			Security:      in.SecurityLevel,
 			IsWireguard:   in.IsWireguard,
+			IsProxy:       in.IsProxy,
 			Routable:      routable,
-			ManagedConnID: byIface[in.Name],
+			ManagedConnID: managedID,
 		})
 	}
 	return InterfacesView{Interfaces: out, DNSRoutingAvailable: dnsAvail}

@@ -35,6 +35,7 @@ func (e *Engine) Settings() SettingsView {
 		RollbackTimeoutS:      s.RollbackTimeoutS,
 		KillSwitchDefault:     s.KillSwitchDefault,
 		AutoSelectIntervalMin: s.AutoSelectIntervalMin,
+		XrayIntegration:       displayXrayIntegration(s.XrayIntegration),
 		Platform: PlatformView{
 			Arch:        e.Platform.Arch,
 			OSVersion:   e.Platform.OSVersion,
@@ -52,6 +53,7 @@ func (e *Engine) SaveSettings(fields map[string]any) error {
 	// hash — see loadAuthFromVault) after the state write succeeds.
 	var newHash string
 	var clearAuth bool
+	var clearProxyDown bool
 	err := e.store.Mutate(func(s *model.State) error {
 		set := &s.Settings
 		if v, ok := getInt(fields, "port"); ok && v > 0 && v < 65536 {
@@ -71,6 +73,18 @@ func (e *Engine) SaveSettings(fields map[string]any) error {
 		}
 		if v, ok := getInt(fields, "auto_select_interval_min"); ok && v >= 0 {
 			set.AutoSelectIntervalMin = v
+		}
+		if v, ok := getString(fields, "xray_integration"); ok {
+			norm, valid := normalizeXrayIntegration(v)
+			if !valid {
+				return fmt.Errorf("invalid xray_integration %q (want auto, proxy, or tproxy)", v)
+			}
+			if norm != set.XrayIntegration {
+				// Changing the mode gives the proxy-connection path a fresh attempt
+				// (clears any latched "Proxy client unavailable" fallback).
+				clearProxyDown = true
+			}
+			set.XrayIntegration = norm
 		}
 
 		// Password / auth handling.
@@ -102,9 +116,38 @@ func (e *Engine) SaveSettings(fields map[string]any) error {
 	} else if clearAuth {
 		e.vault.setAuthHash("")
 	}
+	if clearProxyDown {
+		e.setProxyClientDown(false)
+	}
 	e.Logf("settings saved")
 	e.publishState()
 	return nil
+}
+
+// normalizeXrayIntegration validates and canonicalises the Xray integration
+// mode. "" and "auto" both mean auto-detect and are stored as "" (so the JSON
+// field is omitted); "proxy"/"tproxy" are stored verbatim. The bool is false
+// for any other value.
+func normalizeXrayIntegration(v string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "auto":
+		return "", true
+	case xrayModeProxy:
+		return xrayModeProxy, true
+	case xrayModeTProxy:
+		return xrayModeTProxy, true
+	default:
+		return "", false
+	}
+}
+
+// displayXrayIntegration renders the stored value for the UI, showing the
+// empty (auto-detect) default as "auto".
+func displayXrayIntegration(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "auto"
+	}
+	return v
 }
 
 // ----- auth -----
