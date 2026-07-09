@@ -14,6 +14,7 @@ import type {
   Nfqws,
   NfqwsConf,
   NfqwsConfig,
+  NfqwsImportResult,
   PresetCatalog,
   RouteEntry,
   Server,
@@ -110,6 +111,31 @@ export const mockNfqws: Nfqws = {
   running: true,
   version: 'nfqws2 v1.4.2 (entware)',
   mode: 'MODE_AUTO',
+  kernel_ready: true,
+  missing_modules: [],
+  healthy: true,
+}
+
+// mockImportResult synthesises a plausible split-import outcome for DEV/tests.
+export function mockImportResult(
+  base: string,
+  mode: 'append' | 'replace',
+): NfqwsImportResult {
+  const stem = base.replace(/\.list$/, '') || 'user'
+  return {
+    base: `${stem}.list`,
+    mode,
+    files: [
+      { name: `${stem}.list`, count: 300 },
+      { name: `${stem}2.list`, count: 300 },
+      { name: `${stem}3.list`, count: 74 },
+    ],
+    total: 674,
+    per_file: 300,
+    truncated: false,
+    skipped_n: 0,
+    sources: ['https://example.com/geosite/data/cloudflare'],
+  }
 }
 
 export const mockFailover: Failover = {

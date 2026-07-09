@@ -84,6 +84,12 @@ export interface Nfqws {
   running: boolean
   version?: string
   mode?: NfqwsMode
+  /** Whether the NFQUEUE kernel modules are loaded/loadable. */
+  kernel_ready?: boolean
+  /** Required kernel modules neither loaded nor on disk (empty when ready). */
+  missing_modules?: string[]
+  /** Honest "actually working" signal: installed && running && kernel_ready. */
+  healthy?: boolean
 }
 
 export interface NfqwsConfig {
@@ -126,6 +132,26 @@ export interface NfqwsList {
   content: string
 }
 
+/** One hostlist file written by an import, with its domain count. */
+export interface NfqwsImportFile {
+  name: string
+  count: number
+}
+
+/** Result of importing a remote domain list into the nfqws2 hostlists. A large
+ * set is auto-split across numbered sibling files (user.list, user2.list, …).
+ * Mirrors engine.NfqwsImportView. */
+export interface NfqwsImportResult {
+  base: string
+  mode: 'append' | 'replace'
+  files: NfqwsImportFile[]
+  total: number
+  per_file: number
+  truncated: boolean
+  skipped_n: number
+  sources: string[]
+}
+
 export interface DomainCheck {
   domain: string
   direct_ok: boolean
@@ -149,6 +175,11 @@ export interface Failover {
   auto_return: boolean
   probe_target: string
   history: FailoverEvent[]
+  /** nfqws-bypass guard: when on and on the direct path, a dead nfqws2 bypass
+   * fails over to nfqws_fallback_to (a conn id, or "direct"). */
+  nfqws_guard?: boolean
+  nfqws_fallback_to?: string
+  nfqws_probe_domains?: string[]
 }
 
 // ----- Routes / "Маршруты" (per-service domain routing) -----

@@ -21,6 +21,9 @@ export const bypass = {
     reloading: 'Reloading strategy…',
     installing: 'Installing nfqws2…',
     actionError: 'Service action failed',
+    kernelMissing: 'NFQUEUE modules missing',
+    kernelMissingDesc:
+      'Running, but the NFQUEUE kernel modules are absent — the bypass is inert until they load: {modules}',
 
     // Tabs
     tabConfig: 'Config',
@@ -78,7 +81,7 @@ export const bypass = {
     importList: 'Import from URL',
     importListTitle: 'Import domains into {name}',
     importListDesc:
-      'Paste a v2fly domain-list, a plain list, or a hosts/AdBlock URL. include: directives and @attribute tags expand automatically.',
+      'Paste a v2fly domain-list, a plain list, or a hosts/AdBlock URL. include: directives and @attribute tags expand automatically; a large set is auto-split across numbered files.',
     importUrlLabel: 'List URL',
     importUrlPlaceholder:
       'https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/youtube',
@@ -86,15 +89,16 @@ export const bypass = {
     importAttrPlaceholder: 'e.g. cn, ads — empty = all',
     importModeAppend: 'Append to list',
     importModeReplace: 'Replace list',
-    importRun: 'Fetch & merge',
-    importRunning: 'Fetching…',
-    importDone: 'Imported {count} domains from {sources} source(s)',
+    importRun: 'Fetch & import',
+    importRunning: 'Importing…',
+    importDone: 'Imported {count} domains into {files} file(s)',
+    importDoneFiles: 'Files: {names}',
     importDoneSkipped: '{count} entries skipped (keyword/regexp).',
     importDoneTrunc: 'Truncated at the safety cap.',
     importFailed: 'Could not fetch or parse that list.',
     importNoDomains: 'No usable domains in that list.',
     importChunkNote:
-      'Keenetic caps a single list at ~100 lines — huge lists are best split across several list files.',
+      'Large lists are auto-split across numbered files (user.list, user2.list, …) of up to 300 domains each.',
 
     // Domain checker
     checkTitle: 'Domain reachability',
@@ -133,6 +137,9 @@ export const bypass = {
     reloading: 'Перечитываю стратегию…',
     installing: 'Устанавливаю nfqws2…',
     actionError: 'Действие с сервисом не удалось',
+    kernelMissing: 'Нет модулей NFQUEUE',
+    kernelMissingDesc:
+      'Работает, но модули ядра NFQUEUE отсутствуют — обход бездействует, пока они не загрузятся: {modules}',
 
     // Tabs
     tabConfig: 'Конфигурация',
@@ -190,7 +197,7 @@ export const bypass = {
     importList: 'Импорт из URL',
     importListTitle: 'Импорт доменов в {name}',
     importListDesc:
-      'Вставьте v2fly domain-list, обычный список или hosts/AdBlock URL. Директивы include: и теги @attribute разворачиваются автоматически.',
+      'Вставьте v2fly domain-list, обычный список или hosts/AdBlock URL. Директивы include: и теги @attribute разворачиваются автоматически; большой набор автоматически разбивается на нумерованные файлы.',
     importUrlLabel: 'URL списка',
     importUrlPlaceholder:
       'https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/youtube',
@@ -198,15 +205,16 @@ export const bypass = {
     importAttrPlaceholder: 'напр. cn, ads — пусто = все',
     importModeAppend: 'Добавить в список',
     importModeReplace: 'Заменить список',
-    importRun: 'Загрузить и слить',
-    importRunning: 'Загрузка…',
-    importDone: 'Импортировано {count} доменов из {sources} источник(ов)',
+    importRun: 'Загрузить и импортировать',
+    importRunning: 'Импорт…',
+    importDone: 'Импортировано {count} доменов в {files} файл(а/ов)',
+    importDoneFiles: 'Файлы: {names}',
     importDoneSkipped: 'Пропущено записей: {count} (keyword/regexp).',
     importDoneTrunc: 'Обрезано по защитному лимиту.',
     importFailed: 'Не удалось загрузить или разобрать список.',
     importNoDomains: 'В списке нет пригодных доменов.',
     importChunkNote:
-      'Keenetic ограничивает один список ~100 строками — очень большие списки лучше разбивать на несколько файлов.',
+      'Большие списки автоматически разбиваются на нумерованные файлы (user.list, user2.list, …) не более 300 доменов в каждом.',
 
     // Domain checker
     checkTitle: 'Доступность домена',

@@ -30,6 +30,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
@@ -393,6 +394,84 @@ export function FailoverPage() {
                 onCheckedChange={(v) => update({ auto_return: v })}
                 aria-label={t('failover.autoReturn')}
               />
+            </div>
+
+            <Separator />
+
+            {/* nfqws-bypass guard: direct-path DPI-bypass death → tunnel. */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <Label className="flex items-center gap-1.5">
+                    <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                    {t('failover.nfqwsGuardTitle')}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t('failover.nfqwsGuardEnable')}
+                  </p>
+                </div>
+                <Switch
+                  checked={!!draft.nfqws_guard}
+                  onCheckedChange={(v) => update({ nfqws_guard: v })}
+                  aria-label={t('failover.nfqwsGuardEnable')}
+                />
+              </div>
+
+              {draft.nfqws_guard ? (
+                <div className="space-y-3 rounded-md border border-border/70 bg-muted/30 p-3">
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {t('failover.nfqwsGuardDesc')}
+                  </p>
+                  <div className="space-y-2">
+                    <Label htmlFor="nfqws-fallback">
+                      {t('failover.nfqwsFallbackLabel')}
+                    </Label>
+                    <Select
+                      value={draft.nfqws_fallback_to ?? ''}
+                      onValueChange={(v) => update({ nfqws_fallback_to: v })}
+                    >
+                      <SelectTrigger id="nfqws-fallback" className="text-sm">
+                        <SelectValue
+                          placeholder={t('failover.nfqwsFallbackPlaceholder')}
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(connections ?? []).map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                        <SelectItem value={DIRECT}>
+                          {t('common.directWan')}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="nfqws-probe">
+                      {t('failover.nfqwsProbeLabel')}
+                    </Label>
+                    <Input
+                      id="nfqws-probe"
+                      value={(draft.nfqws_probe_domains ?? []).join(', ')}
+                      onChange={(e) =>
+                        update({
+                          nfqws_probe_domains: e.target.value
+                            .split(/[\s,]+/)
+                            .map((d) => d.trim())
+                            .filter(Boolean),
+                        })
+                      }
+                      placeholder={t('failover.nfqwsProbePlaceholder')}
+                      className="font-mono text-xs"
+                      spellCheck={false}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {t('failover.nfqwsProbeHint')}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>

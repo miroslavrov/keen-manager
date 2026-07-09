@@ -161,6 +161,16 @@ export const en = {
     noHistoryDesc: 'Route switches will appear here as they happen.',
     saved: 'Failover configuration saved',
     saveError: 'Could not save failover config',
+    nfqwsGuardTitle: 'nfqws bypass guard',
+    nfqwsGuardEnable: 'Fall back when the DPI bypass dies',
+    nfqwsGuardDesc:
+      'On the direct path, if nfqws2 dies (daemon down, NFQUEUE modules missing, or the probe domains all fail directly), switch to a tunnel that routes around DPI.',
+    nfqwsFallbackLabel: 'Fallback connection',
+    nfqwsFallbackPlaceholder: 'Choose a tunnel…',
+    nfqwsProbeLabel: 'Probe domains (optional)',
+    nfqwsProbePlaceholder: 'rutracker.org, instagram.com',
+    nfqwsProbeHint:
+      'Should-bypass domains checked on the direct path. Any one reachable means the bypass works; all failing trips the guard.',
   },
   login: {
     title: 'keen-manager',

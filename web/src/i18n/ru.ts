@@ -163,6 +163,16 @@ export const ru = {
     noHistoryDesc: 'Переключения маршрута будут появляться здесь.',
     saved: 'Конфигурация отказоустойчивости сохранена',
     saveError: 'Не удалось сохранить конфигурацию',
+    nfqwsGuardTitle: 'Страж обхода nfqws',
+    nfqwsGuardEnable: 'Резерв при смерти обхода DPI',
+    nfqwsGuardDesc:
+      'На прямом пути, если nfqws2 умирает (демон упал, нет модулей NFQUEUE или все проверочные домены недоступны напрямую), переключиться на туннель, обходящий DPI.',
+    nfqwsFallbackLabel: 'Подключение для резерва',
+    nfqwsFallbackPlaceholder: 'Выберите туннель…',
+    nfqwsProbeLabel: 'Проверочные домены (необязательно)',
+    nfqwsProbePlaceholder: 'rutracker.org, instagram.com',
+    nfqwsProbeHint:
+      'Домены, которые должны идти через обход, проверяются по прямому пути. Хотя бы один доступен — обход работает; все недоступны — страж срабатывает.',
   },
   login: {
     title: 'keen-manager',

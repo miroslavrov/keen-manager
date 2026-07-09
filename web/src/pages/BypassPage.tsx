@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertTriangle,
   CheckCircle2,
   Download,
   FileText,
@@ -49,7 +50,7 @@ import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useT } from '@/i18n'
-import type { DomainCheck, NfqwsConf, NfqwsMode } from '@/lib/types'
+import type { DomainCheck, NfqwsConf, NfqwsImportResult, NfqwsMode } from '@/lib/types'
 
 // nfqws2 mode macro <-> Select value. The structured conf stores the active
 // mode as a macro in NFQWS_EXTRA_ARGS (e.g. "$MODE_AUTO").
@@ -82,7 +83,14 @@ export function BypassPage() {
       {isLoading ? (
         <Skeleton className="h-28" />
       ) : (
-        <ServiceControlCard installed={!!nfqws?.installed} running={!!nfqws?.running} version={nfqws?.version} mode={nfqws?.mode} />
+        <ServiceControlCard
+          installed={!!nfqws?.installed}
+          running={!!nfqws?.running}
+          version={nfqws?.version}
+          mode={nfqws?.mode}
+          kernelReady={nfqws?.kernel_ready}
+          missingModules={nfqws?.missing_modules}
+        />
       )}
 
       <Tabs defaultValue="config">
@@ -111,16 +119,24 @@ function ServiceControlCard({
   running,
   version,
   mode,
+  kernelReady,
+  missingModules,
 }: {
   installed: boolean
   running: boolean
   version?: string
   mode?: NfqwsMode
+  kernelReady?: boolean
+  missingModules?: string[]
 }) {
   const t = useT()
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const [pending, setPending] = React.useState<NfqwsServiceAction | null>(null)
+
+  // A running daemon whose NFQUEUE kernel modules are absent is up but inert —
+  // surface it prominently so "running" isn't mistaken for "working".
+  const kernelInert = installed && running && kernelReady === false
 
   const actionMutation = useMutation({
     mutationFn: (action: NfqwsServiceAction) => api.nfqwsAction(action),
@@ -147,7 +163,8 @@ function ServiceControlCard({
 
   return (
     <Card>
-      <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
+      <CardContent className="space-y-4 p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <div
             className={cn(
@@ -262,6 +279,23 @@ function ServiceControlCard({
             </>
           )}
         </div>
+        </div>
+
+        {kernelInert ? (
+          <div className="flex items-start gap-2.5 rounded-md border border-warning/30 bg-warning/5 px-3 py-2.5">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">
+                {t('bypass.kernelMissing')}
+              </p>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                {t('bypass.kernelMissingDesc', {
+                  modules: (missingModules ?? []).join(', ') || 'nfnetlink_queue, xt_NFQUEUE',
+                })}
+              </p>
+            </div>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )
@@ -722,20 +756,16 @@ function HostlistsManager() {
     }
   }, [listData])
 
-  const mergeImported = (domains: string[], mode: 'append' | 'replace') => {
-    setContent((prev) => {
-      if (mode === 'replace') return domains.join('\n')
-      const existing = new Set(
-        prev
-          .split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean),
-      )
-      const merged = prev.replace(/\s+$/, '').split('\n')
-      for (const d of domains) if (!existing.has(d)) merged.push(d)
-      return merged.join('\n')
-    })
-    setDirty(true)
+  // After a server-side import the hostlist family is already written (and
+  // split across user.list / user2.list / …), so refresh the index and open the
+  // base file rather than merging text client-side.
+  const handleImported = (res: NfqwsImportResult) => {
+    queryClient.invalidateQueries({ queryKey: ['nfqws-lists'] })
+    queryClient.invalidateQueries({ queryKey: ['nfqws-list', res.base] })
+    queryClient.invalidateQueries({ queryKey: ['nfqws'] })
+    queryClient.invalidateQueries({ queryKey: ['state'] })
+    setSelected(res.base)
+    setDirty(false)
   }
 
   const saveMutation = useMutation({
@@ -852,15 +882,16 @@ function HostlistsManager() {
         open={importOpen}
         onOpenChange={setImportOpen}
         listName={selected ?? ''}
-        onImported={mergeImported}
+        onImported={handleImported}
       />
     </div>
   )
 }
 
 // ImportListDialog fetches a remote domain-list URL (v2fly / plain / hosts),
-// flattening include: directives and @attribute tags server-side, then hands
-// the domains back to be merged into the open hostlist for review before save.
+// flattening include: directives and @attribute tags server-side, then writes
+// the result into the hostlist family — auto-splitting a large set across
+// numbered files (user.list, user2.list, …) of up to 300 domains each.
 function ImportListDialog({
   open,
   onOpenChange,
@@ -870,7 +901,7 @@ function ImportListDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
   listName: string
-  onImported: (domains: string[], mode: 'append' | 'replace') => void
+  onImported: (res: NfqwsImportResult) => void
 }) {
   const t = useT()
   const { toast } = useToast()
@@ -879,22 +910,27 @@ function ImportListDialog({
   const [mode, setMode] = React.useState<'append' | 'replace'>('append')
 
   const importMutation = useMutation({
-    mutationFn: () => api.resolveList(url.trim(), attr.trim() || undefined),
+    mutationFn: () =>
+      api.importNfqwsList(listName, url.trim(), attr.trim() || undefined, mode),
     onSuccess: (res) => {
-      if (!res.domains || res.domains.length === 0) {
+      if (!res.files || res.files.length === 0 || res.total === 0) {
         toast({ variant: 'error', title: t('bypass.importNoDomains') })
         return
       }
-      onImported(res.domains, mode)
-      const extra: string[] = []
+      onImported(res)
+      const extra: string[] = [
+        t('bypass.importDoneFiles', {
+          names: res.files.map((f) => f.name).join(', '),
+        }),
+      ]
       if (res.skipped_n > 0)
         extra.push(t('bypass.importDoneSkipped', { count: res.skipped_n }))
       if (res.truncated) extra.push(t('bypass.importDoneTrunc'))
       toast({
         variant: 'success',
         title: t('bypass.importDone', {
-          count: res.domains.length,
-          sources: res.sources?.length ?? 1,
+          count: res.total,
+          files: res.files.length,
         }),
         description: extra.join(' ') || undefined,
       })

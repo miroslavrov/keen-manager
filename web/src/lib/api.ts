@@ -25,6 +25,7 @@ import type {
   Nfqws,
   NfqwsConf,
   NfqwsConfig,
+  NfqwsImportResult,
   NfqwsList,
   Ok,
   PresetCatalog,
@@ -365,6 +366,23 @@ export const api = {
           body: { content },
         }),
       { ok: true },
+    ),
+
+  // Import a remote domain list into the hostlists, auto-splitting a large set
+  // across numbered sibling files (user.list, user2.list, …) server-side.
+  importNfqwsList: (
+    base: string,
+    url: string,
+    attr: string | undefined,
+    mode: 'append' | 'replace',
+  ) =>
+    withOk<NfqwsImportResult>(
+      () =>
+        request('/nfqws/lists/import', {
+          method: 'POST',
+          body: { base, url, attr, mode },
+        }),
+      () => mocks.mockImportResult(base, mode),
     ),
 
   checkDomain: (domain: string) =>
