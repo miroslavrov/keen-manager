@@ -43,10 +43,13 @@ AWG2).
   (e) delete the last Xray connection → `ProxyN` removed. See
   `docs/XRAY-PROXY-PLAN.md` §5.
 - [ ] **Web Settings toggle for Xray integration** (auto/proxy/tproxy): page +
-  types + i18n + mocks are written but the embedded bundle could NOT be rebuilt
-  this session (npm registry blocked in the sandbox). Rebuild
-  `internal/webui/dist` (Node 24) and commit it in the same commit before it
-  ships in the UI (CI guard). The backend works without it (auto-detect + API).
+  types + i18n + mocks are written and pushed to branch **`wip/web-xray-toggle`**
+  (the embedded bundle could NOT be rebuilt this session — npm registry blocked
+  in the sandbox — so the branch must NOT be merged as-is). To land: approve
+  `registry.npmjs.org`, `npm ci` + `npm run build` (Node 24), then commit
+  `web/src` + the rebuilt `internal/webui/dist` in one `feat(web)` commit on main
+  (CI guard) and delete the branch. The backend works without it (auto-detect +
+  `PUT /api/settings {xray_integration}`).
 
 ---
 

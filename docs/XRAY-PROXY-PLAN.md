@@ -35,11 +35,13 @@ Session 8 — what landed (all in main):
    best guess, isolated so it is a one-function fix. A wrong guess degrades to
    TPROXY (logged), it does not brick anything — but the proxy path won't work
    until the shape matches.
-2. **Web Settings toggle**: code is written (SettingsPage + types + i18n +
-   mocks) but the embedded bundle could not be rebuilt this session (npm
-   registry blocked in the sandbox — RequestNetworkAccess pending). Rebuild
-   `internal/webui/dist` and commit it in the same commit before this ships in
-   the UI (CI guard). Backend works without it (auto-detect + API).
+2. **Web Settings toggle**: code is written and pushed to branch
+   `wip/web-xray-toggle` (SettingsPage + types + i18n + mocks) but the embedded
+   bundle could not be rebuilt this session (npm registry blocked in the sandbox
+   — 403). Do NOT merge that branch as-is (CI bundle guard). To land: approve
+   `registry.npmjs.org`, `npm ci` + `npm run build`, then commit `web/src` + the
+   rebuilt `internal/webui/dist` in one `feat(web)` commit on main and delete the
+   branch. Backend works without it (auto-detect + API).
 3. Run the on-device validation checklist in §5.
 
 ---
