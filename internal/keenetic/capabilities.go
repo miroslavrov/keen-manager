@@ -139,35 +139,60 @@ func extractVersionToken(s string) string {
 // keeneticVersion is a parsed Keenetic release string. KeeneticOS uses a
 // distinctive scheme that mixes a numeric "major.minor" with either:
 //
-//   - an alpha/beta channel marker + build ("5.01.A.3", "5.01.B.1"), or
+//   - a channel letter + build ("5.01.A.3" alpha, "5.01.B.1" beta,
+//     "5.01.C.0.0-1" stable/release), or
 //   - a plain numeric patch for final releases ("5.01.03"), or
 //   - just "major.minor" once the leading zero and channel are dropped
-//     entirely by later branches ("5.02", "6.0").
+//     entirely by later branches ("5.02", "6.0"), or
+//   - a plain "5.1.0" as some firmware/RCI reports it.
 //
-// isAtLeast501A3 below is the only consumer; it composes a keeneticVersion
-// and compares it against the "5.01.A.3" cutoff using a well-defined channel
-// ordering (final > beta > alpha) so that any alpha build at/after A.3, any
-// beta build at all, and any final/newer release all compare as "at least".
+// KeeneticOS release channels are lettered A = alpha (draft), B = beta
+// (preview), C = stable (the shipping release). So the shipping "5.01.C.x"
+// firmware is 5.1.0 stable — NEWER than any A/B build of the same major.minor,
+// not older. The channel field below orders them accordingly, and any letter
+// at or beyond C is treated as the stable tier. Release strings also carry a
+// trailing revision ("-1", "-r2") which is stripped before parsing.
+//
+// isAtLeast501A3 (AWG2 gate) and isAtLeast5 (DNS-route gate) are the consumers;
+// isAtLeast501A3 compares against the "5.01.A.3" cutoff using a well-defined
+// channel ordering (stable > beta > alpha) so that any alpha build at/after
+// A.3, any beta/stable build, and any final/newer release all compare as "at
+// least".
 type keeneticVersion struct {
 	major int
 	minor int
-	// channel: 0 = alpha, 1 = beta, 2 = final (no channel marker, or a
-	// release so new it no longer carries one at all).
+	// channel: 0 = alpha (A), 1 = beta (B), 2 = final/stable (C and later
+	// letters, a plain numeric patch, or a release so new it carries no
+	// channel marker at all).
 	channel int
 	// build is the alpha/beta build number (the trailing ".3" in "5.01.A.3"),
-	// or the numeric patch for a final release (the "03" in "5.01.03").
+	// or the numeric patch for a final release (the "03" in "5.01.03"). It is
+	// 0 for a stable-channel string whose build segment is absent or 0.
 	build int
 }
 
 // parseKeeneticVersion parses the Keenetic release formats documented on
-// isAtLeast501A3. It returns ok=false for anything it cannot confidently
-// parse (including the empty string), and callers should treat that as "does
-// not meet the cutoff" rather than erroring, since an undetectable version is
-// most likely very old firmware that predates structured release strings.
+// keeneticVersion. It is deliberately lenient: it strips any trailing
+// revision/build suffix ("-1", "-r2"), tolerates extra trailing segments, and
+// accepts any single-letter channel marker (A/B/C/…) rather than only the
+// A/B it historically knew — the shipping "5.01.C.0.0-1" stable firmware
+// previously fell through to a parse failure, which silently disabled native
+// AWG2 and DNS routing on current KeeneticOS.
+//
+// It returns ok=false only for genuinely unparseable strings (empty, or no
+// numeric major.minor). Callers treat ok=false as "does not meet the cutoff",
+// since an undetectable version is most likely very old firmware that predates
+// structured release strings.
 func parseKeeneticVersion(release string) (keeneticVersion, bool) {
 	release = strings.TrimSpace(release)
 	if release == "" {
 		return keeneticVersion{}, false
+	}
+	// Drop a leading "v" and any trailing revision/build/space suffix so
+	// "5.01.C.0.0-1", "v5.1.0" and "5.02 (AAB)" all reduce to the version core.
+	release = strings.TrimPrefix(release, "v")
+	if i := strings.IndexAny(release, "-+ \t"); i >= 0 {
+		release = release[:i]
 	}
 
 	segs := strings.Split(release, ".")
@@ -179,47 +204,56 @@ func parseKeeneticVersion(release string) (keeneticVersion, bool) {
 	if err != nil {
 		return keeneticVersion{}, false
 	}
-	minor, err := strconv.Atoi(strings.TrimLeft(segs[1], "0"))
+	// strconv.Atoi handles leading zeros ("01" -> 1, "00" -> 0) directly.
+	minor, err := strconv.Atoi(segs[1])
 	if err != nil {
-		// A minor segment of exactly "00" trims to "" above; that's a valid
-		// zero, not a parse failure.
-		if segs[1] != "" && strings.Trim(segs[1], "0") == "" {
-			minor = 0
-		} else {
-			return keeneticVersion{}, false
-		}
-	}
-
-	v := keeneticVersion{major: major, minor: minor, channel: 2}
-
-	switch {
-	case len(segs) >= 4 && strings.EqualFold(segs[2], "A"):
-		build, err := strconv.Atoi(segs[3])
-		if err != nil {
-			return keeneticVersion{}, false
-		}
-		v.channel, v.build = 0, build
-	case len(segs) >= 4 && strings.EqualFold(segs[2], "B"):
-		build, err := strconv.Atoi(segs[3])
-		if err != nil {
-			return keeneticVersion{}, false
-		}
-		v.channel, v.build = 1, build
-	case len(segs) == 3:
-		// Final release with a numeric patch segment, e.g. "5.01.03".
-		build, err := strconv.Atoi(segs[2])
-		if err != nil {
-			return keeneticVersion{}, false
-		}
-		v.channel, v.build = 2, build
-	case len(segs) == 2:
-		// Bare "major.minor" final release, e.g. "5.02", "6.0".
-		v.channel, v.build = 2, 0
-	default:
 		return keeneticVersion{}, false
 	}
 
+	// Default to the stable/final tier; a recognised channel letter or numeric
+	// patch segment refines it below. Extra trailing segments are ignored.
+	v := keeneticVersion{major: major, minor: minor, channel: 2}
+	if len(segs) >= 3 {
+		if ch, ok := channelForLetter(segs[2]); ok {
+			v.channel = ch
+			if len(segs) >= 4 {
+				if b, err := strconv.Atoi(segs[3]); err == nil {
+					v.build = b
+				}
+			}
+		} else if b, err := strconv.Atoi(segs[2]); err == nil {
+			// Final release with a numeric patch segment, e.g. "5.01.03".
+			v.channel, v.build = 2, b
+		}
+		// An unrecognised third segment (neither a channel letter nor numeric)
+		// leaves the default stable tier / build 0 — major.minor still decides.
+	}
+
 	return v, true
+}
+
+// channelForLetter maps a Keenetic channel marker to a comparable tier:
+// A = alpha (0), B = beta (1), and C or any later letter = stable/final (2).
+// It returns ok=false when s is not a single ASCII letter, so the caller can
+// fall back to interpreting the segment as a numeric patch.
+func channelForLetter(s string) (int, bool) {
+	if len(s) != 1 {
+		return 0, false
+	}
+	c := s[0]
+	if c >= 'a' && c <= 'z' {
+		c -= 'a' - 'A'
+	}
+	switch {
+	case c == 'A':
+		return 0, true // alpha / draft
+	case c == 'B':
+		return 1, true // beta / preview
+	case c >= 'C' && c <= 'Z':
+		return 2, true // stable / release channel (C is the shipping channel)
+	default:
+		return 0, false
+	}
 }
 
 // compare returns -1, 0, or 1 as v is less than, equal to, or greater than

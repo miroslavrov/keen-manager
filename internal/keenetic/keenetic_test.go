@@ -781,6 +781,33 @@ func TestDetectCapabilities_NoWireguardComponent(t *testing.T) {
 	}
 }
 
+// TestDetectCapabilities_ChannelC reproduces the user's live device: the
+// shipping KeeneticOS 5.1.0 firmware reports release "5.01.C.0.0-1". Before the
+// channel-C fix this parsed as "too old", so SupportsAWG2/SupportsDNSRoute came
+// back false and the daemon logged native-awg2=false (HANDOFF §0 [P0]).
+func TestDetectCapabilities_ChannelC(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"release": "5.01.C.0.0-1", "title": "KeeneticOS", "ndw": {"components": "wireguard,amneziawg,schedule"}}`))
+	})
+	caps, err := DetectCapabilities(context.Background(), c)
+	if err != nil {
+		t.Fatalf("DetectCapabilities: %v", err)
+	}
+	if caps.Release != "5.01.C.0.0-1" {
+		t.Errorf("Release = %q, want 5.01.C.0.0-1", caps.Release)
+	}
+	if !caps.SupportsAWG2 {
+		t.Error("SupportsAWG2 = false, want true for stable 5.01.C (5.1.0)")
+	}
+	if !caps.SupportsDNSRoute {
+		t.Error("SupportsDNSRoute = false, want true for 5.x")
+	}
+	if !caps.HasWireguard {
+		t.Error("HasWireguard = false, want true (wireguard is in components)")
+	}
+}
+
 // --- isAtLeast501A3 table ----------------------------------------------------
 
 func TestIsAtLeast501A3(t *testing.T) {
@@ -798,11 +825,83 @@ func TestIsAtLeast501A3(t *testing.T) {
 		{"5.02", true},
 		{"6.0", true},
 		{"", false},
+		// Channel C = stable/release. The shipping KeeneticOS 5.1.0 firmware
+		// reports "5.01.C.0.0-1"; it MUST parse as >= 5.01.A.3 (regression that
+		// silently disabled native AWG2 on real devices, see HANDOFF §0 [P0]).
+		{"5.01.C.0.0-1", true},
+		{"5.01.C.0.0", true},
+		{"5.01.C", true},
+		{"5.1.0", true},
+		{"v5.1.0", true},
+		// Stable channel but older major.minor -> still below the AWG2 cutoff.
+		{"5.0.x", false},
+		{"5.00.C.0.0-1", false},
+		{"3.7.C.0.0-1", false},
+		{"4.0.C.1", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.release, func(t *testing.T) {
 			if got := isAtLeast501A3(tc.release); got != tc.want {
 				t.Errorf("isAtLeast501A3(%q) = %v, want %v", tc.release, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsAtLeast5(t *testing.T) {
+	// isAtLeast5 gates the native DNS-routing stack (object-group fqdn +
+	// dns-proxy route), which landed with KeeneticOS 5.x.
+	cases := []struct {
+		release string
+		want    bool
+	}{
+		{"", false},
+		{"4.2", false},
+		{"4.0.C.1", false},
+		{"5.0", true},
+		{"5.0.x", true},
+		{"5.01.C.0.0-1", true},
+		{"5.1.0", true},
+		{"6.0", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.release, func(t *testing.T) {
+			if got := isAtLeast5(tc.release); got != tc.want {
+				t.Errorf("isAtLeast5(%q) = %v, want %v", tc.release, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseKeeneticVersion(t *testing.T) {
+	cases := []struct {
+		release             string
+		wantOK              bool
+		major, minor        int
+		channel, build      int
+	}{
+		{"5.01.C.0.0-1", true, 5, 1, 2, 0},   // stable, revision tail stripped
+		{"5.01.A.3", true, 5, 1, 0, 3},       // alpha build 3
+		{"5.01.B.1", true, 5, 1, 1, 1},       // beta build 1
+		{"5.01.03", true, 5, 1, 2, 3},        // final numeric patch
+		{"5.02", true, 5, 2, 2, 0},           // bare major.minor
+		{"5.1.0", true, 5, 1, 2, 0},          // dotted plain form
+		{"6.0", true, 6, 0, 2, 0},
+		{"garbage", false, 0, 0, 0, 0},
+		{"", false, 0, 0, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.release, func(t *testing.T) {
+			v, ok := parseKeeneticVersion(tc.release)
+			if ok != tc.wantOK {
+				t.Fatalf("parseKeeneticVersion(%q) ok = %v, want %v", tc.release, ok, tc.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if v.major != tc.major || v.minor != tc.minor || v.channel != tc.channel || v.build != tc.build {
+				t.Errorf("parseKeeneticVersion(%q) = %+v, want {major:%d minor:%d channel:%d build:%d}",
+					tc.release, v, tc.major, tc.minor, tc.channel, tc.build)
 			}
 		})
 	}
