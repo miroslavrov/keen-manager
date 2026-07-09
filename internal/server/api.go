@@ -59,6 +59,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nfqws/config/structured", s.requireAuth(s.handleNfqwsConfigStructured))
 	mux.HandleFunc("PUT /api/nfqws/config/structured", s.requireAuth(s.handleSaveNfqwsConfigStructured))
 	mux.HandleFunc("GET /api/nfqws/lists", s.requireAuth(s.handleNfqwsLists))
+	mux.HandleFunc("POST /api/nfqws/lists/import", s.requireAuth(s.handleImportNfqwsList))
 	mux.HandleFunc("GET /api/nfqws/lists/{name}", s.requireAuth(s.handleNfqwsList))
 	mux.HandleFunc("PUT /api/nfqws/lists/{name}", s.requireAuth(s.handleSaveNfqwsList))
 	mux.HandleFunc("POST /api/nfqws/check-domain", s.requireAuth(s.handleCheckDomain))
@@ -407,6 +408,33 @@ func (s *Server) handleSaveNfqwsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w)
+}
+
+func (s *Server) handleImportNfqwsList(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Base string `json:"base"`
+		URL  string `json:"url"`
+		Attr string `json:"attr"`
+		Mode string `json:"mode"` // "append" | "replace" (default: replace)
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(body.URL) == "" {
+		writeErr(w, http.StatusBadRequest, "list url is required")
+		return
+	}
+	replace := !strings.EqualFold(strings.TrimSpace(body.Mode), "append")
+	v, err := s.eng.ImportNfqwsList(body.Base, body.URL, body.Attr, replace)
+	if err != nil {
+		// A resolve failure is an upstream fetch/parse problem (502); a write
+		// failure or empty result is surfaced the same way the resolver endpoint
+		// does, so the UI can show a fetch/import error distinctly from a 4xx.
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (s *Server) handleCheckDomain(w http.ResponseWriter, r *http.Request) {

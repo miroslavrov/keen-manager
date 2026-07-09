@@ -192,6 +192,28 @@ type NfqwsListView struct {
 	Content string `json:"content"`
 }
 
+// NfqwsListFileView reports one written hostlist file and how many domains it
+// holds after an import/split.
+type NfqwsListFileView struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// NfqwsImportView is the result of importing a remote domain list into the
+// nfqws2 hostlists (POST /api/nfqws/lists/import). A large list is split across
+// numbered sibling files (user.list, user2.list, …) of at most DefaultListSplit
+// entries each; Files lists every file written with its domain count.
+type NfqwsImportView struct {
+	Base      string              `json:"base"`
+	Mode      string              `json:"mode"` // "append" | "replace"
+	Files     []NfqwsListFileView `json:"files"`
+	Total     int                 `json:"total"`
+	PerFile   int                 `json:"per_file"`
+	Truncated bool                `json:"truncated"`
+	SkippedN  int                 `json:"skipped_n"`
+	Sources   []string            `json:"sources"`
+}
+
 // DomainCheckView is the domain-reachability probe result.
 type DomainCheckView struct {
 	Domain   string `json:"domain"`

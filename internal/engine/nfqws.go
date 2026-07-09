@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -139,6 +140,88 @@ func (e *Engine) SaveNfqwsList(name, content string) error {
 	}
 	e.Logf("nfqws2 hostlist saved: %s", name)
 	return nil
+}
+
+// ImportNfqwsList resolves a remote domain-list URL and writes it into the
+// nfqws2 hostlists, auto-splitting a large set across numbered sibling files
+// (base, base2, …) of at most nfqws.DefaultListSplit domains each so no single
+// hostlist grows unwieldy. base defaults to "user.list".
+//
+//   - replace=true: the resolved set becomes the family's content (stale
+//     higher-index siblings from a previous larger import are pruned).
+//   - replace=false (append): the resolved set is unioned with whatever the
+//     family already holds, then re-split.
+//
+// The remote fetch is read-only (dry-run safe); the local write is a plain file
+// write under /opt, so this works the same on- and off-device. nfqws2 is
+// reloaded (SIGHUP) when running so the new lists take effect immediately.
+func (e *Engine) ImportNfqwsList(base, url, attr string, replace bool) (NfqwsImportView, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "user.list"
+	}
+	res, err := e.ResolveList(url, attr)
+	if err != nil {
+		return NfqwsImportView{}, err
+	}
+
+	domains := res.Domains
+	mode := "replace"
+	if !replace {
+		mode = "append"
+		existing, err := e.nfqws.ReadListFamily(base)
+		if err != nil {
+			return NfqwsImportView{}, err
+		}
+		domains = mergeDomains(existing, res.Domains)
+	}
+	if len(domains) == 0 {
+		return NfqwsImportView{}, fmt.Errorf("no domains resolved from %s", url)
+	}
+
+	parts := nfqws.SplitDomains(base, domains, nfqws.DefaultListSplit)
+	if _, err := e.nfqws.WriteSplit(base, domains, nfqws.DefaultListSplit); err != nil {
+		return NfqwsImportView{}, err
+	}
+	if e.nfqws.Running() {
+		_ = e.nfqws.Reload()
+	}
+
+	files := make([]NfqwsListFileView, 0, len(parts))
+	for _, p := range parts {
+		files = append(files, NfqwsListFileView{Name: p.Name, Count: len(p.Domains)})
+	}
+	e.Logf("nfqws2 list import (%s): %s -> %d domains across %d file(s)", mode, base, len(domains), len(files))
+	e.publishState()
+	return NfqwsImportView{
+		Base:      nfqws.SplitListName(base, 0),
+		Mode:      mode,
+		Files:     files,
+		Total:     len(domains),
+		PerFile:   nfqws.DefaultListSplit,
+		Truncated: res.Truncated,
+		SkippedN:  res.SkippedN,
+		Sources:   res.Sources,
+	}, nil
+}
+
+// mergeDomains unions two domain slices into a deduped, lowercased, sorted set
+// (deterministic ordering keeps the split stable across re-imports).
+func mergeDomains(a, b []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, d := range list {
+			d = strings.ToLower(strings.TrimSpace(d))
+			if d == "" || seen[d] {
+				continue
+			}
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // CheckDomain probes a domain's reachability on the direct path (where nfqws2
