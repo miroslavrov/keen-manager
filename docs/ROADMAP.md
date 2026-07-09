@@ -79,6 +79,42 @@ AWG2).
   me in without a password"); auth state is now revalidated fresh, and auth
   endpoints send `no-store`.
 
+## P0 — bugs found on-device (session 4) / баги с устройства
+
+- [ ] **Capabilities parser rejects the "C" release channel.**
+  `internal/keenetic/capabilities.go` `parseKeeneticVersion` only knows the `A`/`B`
+  channels, so a real device reporting `release="5.01.C.0.0-1"` falls through to the
+  `default` branch → `ok=false` → `SupportsAWG2=false`, `SupportsDNSRoute=false`
+  (daemon logs `native-awg2=false`). This silently disables native AWG2 interface
+  creation and the whole native DNS-routing / Routes path on capable firmware. Fix:
+  tolerate the `5.01.C.0.0-1` shape (trim the `-N` tail, ignore extra segments) and
+  treat any non-`A` letter channel (`B`/`C`/…) as ≥ beta; AWG2 = `major>5` or
+  (`major==5 && minor>=1`, excluding early `5.01.A.0..A.2`). Add regression cases to
+  `capabilities_test.go`. **Do this first** — it unblocks items in P1 below on the
+  user's actual device.
+- [ ] **Web-UI password is a phantom lock-out (auth persistence bug).**
+  `model.Settings.PasswordHash` is tagged `json:"-"`, so `config.Store.save()` never
+  writes it to `state.json`, but `auth_enabled` *is* persisted. After a daemon
+  restart the UI demands a password that can never validate (hash is gone). No CLI to
+  reset. Fix: persist the hash in a 0600 vault file, self-heal on load
+  (`auth_enabled && hash=="" ⇒ auth off`), and add `keen-manager passwd` /
+  `auth disable`.
+- [ ] **No router-interface listing.** There is no `GET /api/interfaces`; the Routes
+  target picker only filters existing `awg`-type connections client-side, so it is
+  empty for Xray-only users and nothing is pulled live from KeenOS. Add
+  `keenetic.ListInterfaces` over RCI `GET /show/interface/` → `GET /api/interfaces` →
+  a real interface dropdown in the UI. (awg-manager research for the exact `show
+  interface` shape did not complete this session — verify against
+  github.com/hoaxisr/awg-manager and/or a live `curl localhost:79/rci/show/interface/`.)
+- [ ] **Select-best / activation surfaces only a generic error.** Xray activation that
+  fails verification (`verifyActive` probe through the tunnel) rolls back to "no active
+  connection", and the frontend (`use-actions.tsx`, `SubscriptionsPage` select-best
+  mutation) swallows the real backend error into a generic toast. Surface the real
+  error, log `xray` stderr on bring-up failure, and make the probe target configurable
+  (the default gstatic probe may itself be DPI-blocked). Root-cause the tunnel
+  handshake failure on-device (`xray -test` + run logs). Note: Xray connections are
+  transparent-proxy and never become router interfaces — this is by design, not a bug.
+
 ## P1 — next / ближайшее
 
 - [~] **Native AWG2 traffic routing — validate on-device.** Interface creation +
