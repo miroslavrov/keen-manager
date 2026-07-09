@@ -79,50 +79,47 @@ AWG2).
   me in without a password"); auth state is now revalidated fresh, and auth
   endpoints send `no-store`.
 
-## P0 — bugs found on-device (session 4) / баги с устройства
+## Fixed — session 5 (backend) + session 6 (frontend) / было P0 из 4-й сессии
 
-- [ ] **Capabilities parser rejects the "C" release channel.**
-  `internal/keenetic/capabilities.go` `parseKeeneticVersion` only knows the `A`/`B`
-  channels, so a real device reporting `release="5.01.C.0.0-1"` falls through to the
-  `default` branch → `ok=false` → `SupportsAWG2=false`, `SupportsDNSRoute=false`
-  (daemon logs `native-awg2=false`). This silently disables native AWG2 interface
-  creation and the whole native DNS-routing / Routes path on capable firmware. Fix:
-  tolerate the `5.01.C.0.0-1` shape (trim the `-N` tail, ignore extra segments) and
-  treat any non-`A` letter channel (`B`/`C`/…) as ≥ beta; AWG2 = `major>5` or
-  (`major==5 && minor>=1`, excluding early `5.01.A.0..A.2`). Add regression cases to
-  `capabilities_test.go`. **Do this first** — it unblocks items in P1 below on the
-  user's actual device.
-- [ ] **Web-UI password is a phantom lock-out (auth persistence bug).**
-  `model.Settings.PasswordHash` is tagged `json:"-"`, so `config.Store.save()` never
-  writes it to `state.json`, but `auth_enabled` *is* persisted. After a daemon
-  restart the UI demands a password that can never validate (hash is gone). No CLI to
-  reset. Fix: persist the hash in a 0600 vault file, self-heal on load
-  (`auth_enabled && hash=="" ⇒ auth off`), and add `keen-manager passwd` /
-  `auth disable`.
-- [ ] **No router-interface listing.** There is no `GET /api/interfaces`; the Routes
-  target picker only filters existing `awg`-type connections client-side, so it is
-  empty for Xray-only users and nothing is pulled live from KeenOS. Add
-  `keenetic.ListInterfaces` over RCI `GET /show/interface/` → `GET /api/interfaces` →
-  a real interface dropdown in the UI. (awg-manager research for the exact `show
-  interface` shape did not complete this session — verify against
-  github.com/hoaxisr/awg-manager and/or a live `curl localhost:79/rci/show/interface/`.)
-- [ ] **Select-best / activation surfaces only a generic error.** Xray activation that
-  fails verification (`verifyActive` probe through the tunnel) rolls back to "no active
-  connection", and the frontend (`use-actions.tsx`, `SubscriptionsPage` select-best
-  mutation) swallows the real backend error into a generic toast. Surface the real
-  error, log `xray` stderr on bring-up failure, and make the probe target configurable
-  (the default gstatic probe may itself be DPI-blocked). Root-cause the tunnel
-  handshake failure on-device (`xray -test` + run logs). Note: Xray connections are
-  transparent-proxy and never become router interfaces — this is by design, not a bug.
+All four on-device bugs from session 4 are **fixed and in main**; the shipping
+`5.01.C.0.0-1` firmware now detects `native-awg2=true`, which unblocks the P1
+validation items below.
+
+- [x] **Capabilities parser now understands the "C" release channel** (fix 9b34603).
+  `parseKeeneticVersion` strips a leading `v` / trailing `-N` revision / extra
+  segments and treats channel letters A=alpha, B=beta, C+=stable, so `5.01.C.0.0-1`
+  (and `5.1.0`, `v5.1.0`, …) parse as ≥ `5.01.A.3` → `SupportsAWG2`/`SupportsDNSRoute`
+  true. Regression cases cover C-channel, older-major C strings, and the plain dotted
+  form. This restored native AWG2 + DNS routing on the user's device.
+- [x] **Web-UI phantom lock-out fixed** (fix 03238d7). The PBKDF2 hash is persisted in
+  the 0600 vault (`servers.json`, `auth` block) — never `state.json`. `loadAuthFromVault`
+  reinstates it at startup and self-heals `auth_enabled && hash=="" ⇒ auth off`, so the
+  UI is always reachable. New CLI `keen-manager passwd <new>` and `auth disable|status`
+  for headless recovery.
+- [x] **Router-interface listing shipped** (feat d042851 + session-6 web). `keenetic.
+  ListInterfaces` over RCI `GET /show/interface/` → `GET /api/interfaces`; the Routes
+  target picker now lists live router interfaces (routable WireGuard, incl. ones made
+  in the Keenetic UI) grouped with keen-manager AWG connections. A route can bind
+  directly to an interface via `target_iface`. Off-device returns an empty list + note.
+- [x] **Select-best / activation now surface the real reason** (fix 16a1012 + session-6
+  web). `verifyActive` returns the probe failure; `Activate` folds the probe target +
+  reason into the error; `api.ts` parses the `{"error":…}` body so activation and
+  select-best toasts show the cause verbatim (rollback reason / "no reachable server")
+  instead of a generic toast. The probe target is editable on the Failover page. Note:
+  Xray connections are transparent-proxy and never become router interfaces — by design.
+  Root-causing the specific handshake failure (DPI vs. probe) remains an on-device task.
 
 ## P1 — next / ближайшее
 
-- [~] **Native AWG2 traffic routing — validate on-device.** Interface creation +
-  bring-up + teardown are wired; the "make it the active internet route"
-  step (`ip global`) is best-effort and needs confirmation on a real 5.1.0
-  device (RCI field shape can vary by firmware). If traffic doesn't route,
+- [~] **Native AWG2 traffic routing — validate on-device (now unblocked).** The
+  channel-C capabilities fix means `native-awg2=true` is finally detected on the
+  user's 5.1.0 firmware, so interface creation is no longer silently disabled.
+  Interface creation + bring-up + teardown are wired; the "make it the active
+  internet route" step (`ip global`) is best-effort and needs confirmation on a
+  real device (RCI field shape can vary by firmware). If traffic doesn't route,
   assign the created `WireguardN` connection a priority in the Keenetic UI — the
-  tunnel itself comes up correctly.
+  tunnel itself comes up correctly. **This is the "adding a server creates a
+  router interface" behaviour the user asked for; validate it end-to-end.**
 - [~] **Validate the Routes / DNS path on-device.** `object-group fqdn` +
   `dns-proxy route` shapes are ported from awg-manager but unverified on live
   5.1.0. **Chunking stays at 300/group** (`keenetic.MaxDomainsPerGroup`) —

@@ -135,17 +135,26 @@ machine that *can* reach GitHub (e.g. behind a VPN), then copy them across.
    curl -fsSLO https://github.com/miroslavrov/keen-manager/releases/latest/download/keen-manager-arm64.gz
    ```
 
-2. **Copy both to the router** over SSH (adjust user/IP; `/tmp` is fine):
+2. **Copy both to the router.** Put them in **`/opt/tmp`** (Entware's storage),
+   over SSH (the Entware SSH login is usually `root` on **port 222**):
 
    ```sh
-   scp install.sh keen-manager-arm64.gz admin@192.168.1.1:/tmp/
+   scp -P 222 install.sh keen-manager-arm64.gz root@192.168.1.1:/opt/tmp/
    ```
+
+   > ⚠️ **`/tmp` ≠ `/opt/tmp` on Keenetic.** `/tmp` is the firmware's volatile
+   > tmpfs; `/opt/tmp` is Entware on the USB/flash storage. They are **different
+   > filesystems**, and file managers (e.g. copying via the KeenOS web UI, which
+   > you may need if `scp` won't connect) commonly drop files into `/opt/tmp`.
+   > Whatever directory you copy into, use that **same** path in step 3 — putting
+   > the files in `/opt/tmp` but running `sh /tmp/install.sh` fails with
+   > `can't open '/tmp/install.sh'`.
 
 3. **On the router**, run the installer pointed at the local file — no network is
    used for the download:
 
    ```sh
-   KEEN_URL="file:///tmp/keen-manager-arm64.gz" KEEN_ARCH=arm64 sh /tmp/install.sh
+   KEEN_URL="file:///opt/tmp/keen-manager-arm64.gz" KEEN_ARCH=arm64 sh /opt/tmp/install.sh
    ```
 
    `KEEN_URL` accepts a `file://` URL or a plain local path; `KEEN_ARCH` skips
@@ -427,17 +436,26 @@ curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scrip
    curl -fsSLO https://github.com/miroslavrov/keen-manager/releases/latest/download/keen-manager-arm64.gz
    ```
 
-2. **Скопируй оба файла на роутер** по SSH (подставь юзера/IP; `/tmp` подойдёт):
+2. **Скопируй оба файла на роутер** в **`/opt/tmp`** (хранилище Entware), по SSH
+   (вход Entware-SSH обычно `root` на **порту 222**):
 
    ```sh
-   scp install.sh keen-manager-arm64.gz admin@192.168.1.1:/tmp/
+   scp -P 222 install.sh keen-manager-arm64.gz root@192.168.1.1:/opt/tmp/
    ```
+
+   > ⚠️ **`/tmp` ≠ `/opt/tmp` на Keenetic.** `/tmp` — это волатильный tmpfs
+   > прошивки, а `/opt/tmp` — Entware на USB/флеше. Это **разные файловые
+   > системы**, и файловые менеджеры (например копирование через веб-морду
+   > KeenOS — оно может понадобиться, если `scp` не подключается) обычно кладут
+   > файлы в `/opt/tmp`. В какой каталог скопировал — тот же путь и указывай в
+   > шаге 3: если файлы в `/opt/tmp`, а запускаешь `sh /tmp/install.sh`, получишь
+   > `can't open '/tmp/install.sh'`.
 
 3. **На роутере** запусти установщик с локальным файлом — сеть для скачивания не
    используется:
 
    ```sh
-   KEEN_URL="file:///tmp/keen-manager-arm64.gz" KEEN_ARCH=arm64 sh /tmp/install.sh
+   KEEN_URL="file:///opt/tmp/keen-manager-arm64.gz" KEEN_ARCH=arm64 sh /opt/tmp/install.sh
    ```
 
    `KEEN_URL` принимает `file://`-URL или обычный локальный путь; `KEEN_ARCH`
