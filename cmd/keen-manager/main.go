@@ -40,6 +40,10 @@ func main() {
 		cmdNfqws(rest)
 	case "route":
 		cmdRoute(rest)
+	case "passwd", "password":
+		cmdPasswd(rest)
+	case "auth":
+		cmdAuth(rest)
 	case "install-hook":
 		eng := openEngine()
 		if err := eng.InstallHook(); err != nil {
@@ -84,6 +88,9 @@ COMMANDS:
                                control the nfqws2 service
   nfqws mode <MODE_AUTO|MODE_LIST|MODE_ALL>
                                set the nfqws2 mode
+  passwd <new-password>        set the web UI password and enable auth
+  auth disable                 turn off the web UI login (recover from a lockout)
+  auth status                  show whether the web UI login is enabled
   route reapply                re-install transparent-proxy rules (ndm hook)
   install-hook                 install the ndm netfilter.d hook (done by installer)
   uninstall-hook               remove the ndm netfilter.d hook
@@ -237,6 +244,39 @@ func cmdRoute(args []string) {
 		fatal("%v", err)
 	}
 	fmt.Println("routes reapplied")
+}
+
+func cmdPasswd(args []string) {
+	if len(args) < 1 || strings.TrimSpace(args[0]) == "" {
+		fatal("usage: keen-manager passwd <new-password>")
+	}
+	eng := openEngine()
+	if err := eng.SetPassword(args[0]); err != nil {
+		fatal("%v", err)
+	}
+	fmt.Println("web UI password set; auth enabled.")
+	fmt.Println("restart the service for a running daemon to pick it up:")
+	fmt.Println("  /opt/etc/init.d/S99keen-manager restart")
+}
+
+func cmdAuth(args []string) {
+	if len(args) == 0 {
+		fatal("usage: keen-manager auth <disable|status>")
+	}
+	eng := openEngine()
+	switch args[0] {
+	case "disable", "off":
+		if err := eng.DisableAuth(); err != nil {
+			fatal("%v", err)
+		}
+		fmt.Println("web UI auth disabled.")
+		fmt.Println("restart the service for a running daemon to pick it up:")
+		fmt.Println("  /opt/etc/init.d/S99keen-manager restart")
+	case "status":
+		printJSON(eng.AuthState(false))
+	default:
+		fatal("usage: keen-manager auth <disable|status>")
+	}
 }
 
 // ----- helpers -----

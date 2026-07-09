@@ -107,6 +107,9 @@ func New(paths platform.Paths, dryRun bool) (*Engine, error) {
 		startTime: time.Now(),
 	}
 	runner.Log = func(cmd string) { e.logs.appendf("exec: %s", cmd) }
+	// Reinstate the persisted web UI password (kept in the 0600 vault, not in
+	// state.json) and self-heal the "auth enabled but no password" lockout.
+	e.loadAuthFromVault()
 	// Best-effort RCI probe: learns firmware release + native AWG2 support.
 	e.detectKeenetic()
 	e.logs.appendf("keen-manager %s ready (arch=%s os=%q dry-run=%v)",

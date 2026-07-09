@@ -223,7 +223,11 @@ type Platform struct {
 type Settings struct {
 	Port             int    `json:"port"`
 	AuthEnabled      bool   `json:"auth_enabled"`
-	PasswordHash     string `json:"-"` // bcrypt-like; never serialized to the UI
+	// PasswordHash is PBKDF2-HMAC-SHA256 (see engine/settings.go). It is
+	// json:"-" so it never reaches the UI, state.json, or state backups; the
+	// engine persists it in the 0600 vault (servers.json) and reinstates it in
+	// memory at startup. Do NOT rely on it surviving via state.json.
+	PasswordHash     string `json:"-"`
 	Theme            string `json:"theme"` // dark | light
 	BackupOnChange   bool   `json:"backup_on_change"`
 	RollbackTimeoutS int    `json:"rollback_timeout_s"`

@@ -47,6 +47,11 @@ func (e *Engine) Settings() SettingsView {
 // backup_on_change, rollback_timeout_s, kill_switch_default,
 // auto_select_interval_min, auth_enabled, password.
 func (e *Engine) SaveSettings(fields map[string]any) error {
+	// newHash / clearAuth carry the credential change out of the Mutate closure
+	// so it can be mirrored to the 0600 vault (the persistent store for the
+	// hash — see loadAuthFromVault) after the state write succeeds.
+	var newHash string
+	var clearAuth bool
 	err := e.store.Mutate(func(s *model.State) error {
 		set := &s.Settings
 		if v, ok := getInt(fields, "port"); ok && v > 0 && v < 65536 {
@@ -70,7 +75,8 @@ func (e *Engine) SaveSettings(fields map[string]any) error {
 
 		// Password / auth handling.
 		if pw, ok := getString(fields, "password"); ok && pw != "" {
-			set.PasswordHash = hashPassword(pw)
+			newHash = hashPassword(pw)
+			set.PasswordHash = newHash
 			set.AuthEnabled = true
 		}
 		if v, ok := getBool(fields, "auth_enabled"); ok {
@@ -78,11 +84,23 @@ func (e *Engine) SaveSettings(fields map[string]any) error {
 				return fmt.Errorf("set a password before enabling authentication")
 			}
 			set.AuthEnabled = v
+			// Turning auth off clears the stored hash so a stale credential
+			// can never silently re-arm a login prompt after a restart.
+			if !v {
+				set.PasswordHash = ""
+				clearAuth = true
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+	// Persist the credential change to the vault so it survives a restart.
+	if newHash != "" {
+		e.vault.setAuthHash(newHash)
+	} else if clearAuth {
+		e.vault.setAuthHash("")
 	}
 	e.Logf("settings saved")
 	e.publishState()
@@ -90,6 +108,66 @@ func (e *Engine) SaveSettings(fields map[string]any) error {
 }
 
 // ----- auth -----
+
+// loadAuthFromVault reinstates the persisted password hash into the in-memory
+// settings at startup and self-heals the "phantom password" lockout: if auth
+// was left enabled but no hash survived (older builds only held the hash in
+// memory), Login() could never succeed, locking the user out of the web UI.
+// In that case auth is turned off so the UI is reachable again; the user can
+// set a fresh password via the Settings page or `keen-manager passwd`.
+func (e *Engine) loadAuthFromVault() {
+	if hash := e.vault.authHash(); hash != "" {
+		e.store.SetAuthHashInMemory(hash)
+	}
+	s := e.store.Settings()
+	if s.AuthEnabled && s.PasswordHash == "" {
+		if err := e.store.Mutate(func(st *model.State) error {
+			st.Settings.AuthEnabled = false
+			return nil
+		}); err != nil {
+			return
+		}
+		e.Logf("auth: was enabled but no stored password survived a restart — auth disabled so the web UI is reachable; set a new password (Settings, or `keen-manager passwd <password>`)")
+	}
+}
+
+// SetPassword sets (or replaces) the web UI password and enables auth,
+// persisting the hash to the 0600 vault. A running daemon reads the hash at
+// startup, so a change made via the CLI takes effect after a service restart.
+func (e *Engine) SetPassword(pw string) error {
+	pw = strings.TrimSpace(pw)
+	if pw == "" {
+		return fmt.Errorf("password must not be empty")
+	}
+	hash := hashPassword(pw)
+	if err := e.store.Mutate(func(s *model.State) error {
+		s.Settings.PasswordHash = hash
+		s.Settings.AuthEnabled = true
+		return nil
+	}); err != nil {
+		return err
+	}
+	e.vault.setAuthHash(hash)
+	e.Logf("web UI password set (auth enabled)")
+	e.publishState()
+	return nil
+}
+
+// DisableAuth turns off the web UI login gate and clears the stored hash. Use
+// it to recover from a lockout without wiping the rest of the configuration.
+func (e *Engine) DisableAuth() error {
+	if err := e.store.Mutate(func(s *model.State) error {
+		s.Settings.AuthEnabled = false
+		s.Settings.PasswordHash = ""
+		return nil
+	}); err != nil {
+		return err
+	}
+	e.vault.setAuthHash("")
+	e.Logf("web UI auth disabled")
+	e.publishState()
+	return nil
+}
 
 // AuthState reports whether auth is enabled and whether the caller is signed in.
 func (e *Engine) AuthState(authenticated bool) AuthStateView {

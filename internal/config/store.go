@@ -65,6 +65,18 @@ func (s *Store) Settings() model.Settings {
 	return s.state.Settings
 }
 
+// SetAuthHashInMemory reinstates the web UI password hash on the in-memory
+// settings WITHOUT persisting state.json. The hash is json:"-" in the model
+// (so it never lands in state.json or its backups) and is instead sourced from
+// the 0600 vault at startup; this setter lets the engine load it back into the
+// live settings after a restart without triggering a state write. It is a
+// no-op for the persisted document, so it does not churn backups on every boot.
+func (s *Store) SetAuthHashInMemory(hash string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state.Settings.PasswordHash = hash
+}
+
 // Mutate applies fn under lock and persists the result. If fn returns an error,
 // the state is not saved.
 func (s *Store) Mutate(fn func(*model.State) error) error {

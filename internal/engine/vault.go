@@ -21,6 +21,18 @@ type vault struct {
 	mu      sync.Mutex
 	path    string
 	Servers map[string]storedServer `json:"servers"`
+	// Auth persists the web UI credential. model.Settings.PasswordHash is
+	// json:"-" (so a hash never leaks to the UI and never lands in state.json
+	// or its backups), which historically meant the hash was lost on restart
+	// while auth_enabled stayed true — locking the user out (HANDOFF §0 [P1]).
+	// Keeping the hash here, in the same 0600 file as server secrets, persists
+	// it across restarts without weakening that no-secrets-in-state property.
+	Auth vaultAuth `json:"auth"`
+}
+
+// vaultAuth is the persisted web UI credential block.
+type vaultAuth struct {
+	PasswordHash string `json:"password_hash,omitempty"`
 }
 
 // storedServer mirrors model.Server with explicit JSON tags so every field —
@@ -120,11 +132,27 @@ func (v *vault) delete(connID string) {
 	}
 }
 
+// authHash returns the persisted web UI password hash ("" when unset).
+func (v *vault) authHash() string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.Auth.PasswordHash
+}
+
+// setAuthHash persists (or clears, when hash is "") the web UI password hash.
+func (v *vault) setAuthHash(hash string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.Auth.PasswordHash = hash
+	_ = v.save()
+}
+
 // save writes the vault atomically with owner-only permissions.
 func (v *vault) save() error {
 	data, err := json.MarshalIndent(struct {
 		Servers map[string]storedServer `json:"servers"`
-	}{v.Servers}, "", "  ")
+		Auth    vaultAuth               `json:"auth"`
+	}{v.Servers, v.Auth}, "", "  ")
 	if err != nil {
 		return err
 	}
