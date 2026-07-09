@@ -29,15 +29,25 @@ AWG2).
   domain/subnet membership; `PUT /api/routes/{id}` (`Engine.UpdateRoute`) edits
   name / domains / subnets / target and re-applies with a clean teardown of the
   old form. Unit-tested. Web editor UI pending the bundle rebuild.
-- [ ] **Web (blocked on npm registry):** land the Xray-integration toggle
-  (`wip/web-xray-toggle`, 4 web files only) + a route editor (open a rule with
-  all its domains, edit, save). Needs `RequestNetworkAccess(registry.npmjs.org)`.
-- [ ] **Proxy "use for internet" flag / exact RCI shape:** needs a device
-  read-back (do not guess). If `dns-proxy route → ProxyN` needs the flag, wire it
-  at LOWEST priority (WAN stays default) + pin a host-route to the server IP.
-- [ ] **nfqws domain selection ("like proxy"):** needs the user's default domain
-  lists (do not invent) + scope confirmation (UI surface; nfqws has no tunnel
-  interface — it desyncs on the direct path via NFQUEUE).
+- [x] **Web — Xray integration toggle (`feat(web)`)** landed on Settings
+  (auto/proxy/tproxy), from `wip/web-xray-toggle` (branch deleted).
+- [x] **Web — route editor (`feat(web)`)**: tap a rule to open a side-drawer with
+  its full domain/subnet lists and save. Bundle rebuilt; CI guard green.
+- [x] **Released `v0.1.0-beta.9`** (prerelease, assets published).
+- [ ] **P0 — Proxy "use for internet" flag / exact RCI shape:** device read-back
+  outstanding (see HANDOFF §0 command block; do not guess). Wire the flag at
+  LOWEST priority (WAN stays default) + pin a host-route to the active server IP.
+- [ ] **P0 — on-device validation** (XRAY-PROXY-PLAN §5); key test
+  `curl -x socks5h://127.0.0.1:10808 https://api.ipify.org` = does the tunnel
+  actually carry traffic (vs. DPI blocking reality/TLS).
+- [ ] **P1 — nfqws as a routable "interface" (user-clarified).** User wants nfqws
+  exposed like Xray (an IP:port that becomes a routable interface), not global
+  inline NFQUEUE. Design: use `tpws` (zapret's socket-level desync proxy) on
+  `127.0.0.1:<port>` → register ONE managed Keenetic `ProxyN` for it (reuse
+  proxyiface.go + the proxyconn.go pattern) → Routes bind to it. Domains share the
+  Routes source (add the bypass interface as a Routes target); default seed =
+  Discord + YouTube presets from `internal/presets`. Verify `tpws` is in the opkg
+  feeds on-device. Same anti-loop rule: do NOT mark it global.
 
 ## Session 8 — Xray as a single KeeneticOS "Proxy connection" (one exit point)
 
