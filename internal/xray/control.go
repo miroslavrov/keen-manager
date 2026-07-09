@@ -43,11 +43,20 @@ func (c *Controller) bin() string {
 
 // Validate runs `xray -test` against a config file and returns an error if the
 // config is invalid. This is the critical pre-apply safety gate.
+//
+// The explicit `-format json` matters: Xray infers a config's format from the
+// file's extension, and our pre-apply temp file is written as
+// "config.json.tmp" (see WriteConfig — the ".tmp" suffix keeps `xray run
+// -confdir` from ever merging a half-written temp, since confdir only reads
+// *.json/*.yaml/*.toml). Without the flag, `xray -test -config config.json.tmp`
+// fails before it ever parses the body with "Failed to get format of …". Since
+// keen-manager always emits JSON, we force the format so validation works
+// regardless of the file's name.
 func (c *Controller) Validate(configPath string) error {
 	if !c.Installed() {
 		return fmt.Errorf("xray binary not found")
 	}
-	res := c.Runner.Run(c.bin(), "-test", "-config", configPath)
+	res := c.Runner.Run(c.bin(), "-test", "-config", configPath, "-format", "json")
 	if res.Err != nil {
 		return fmt.Errorf("xray config invalid: %s", firstNonEmptyStr(res.Stderr, res.Stdout))
 	}
@@ -75,8 +84,14 @@ func (c *Controller) WriteConfig(cfg *Config) (string, error) {
 		}
 	}
 
-	// Write to a temp file, validate, then atomically rename.
+	// Write to a temp file, validate, then atomically rename. The ".tmp" suffix
+	// (rather than a second ".json") is deliberate: `xray run -confdir` only
+	// merges *.json/*.yaml/*.toml, so a crash between write and rename can never
+	// leave a partial config the daemon would load on its next start. Validate
+	// forces `-format json` so the unrecognised extension doesn't trip Xray's
+	// format detection. Clear any stale temp from a previously interrupted write.
 	tmp := path + ".tmp"
+	_ = os.Remove(tmp)
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return "", err
 	}
