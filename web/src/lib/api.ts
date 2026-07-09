@@ -32,6 +32,14 @@ import type {
 
 const BASE = '/api'
 
+// Mocks are a DEVELOPMENT/TEST convenience ONLY. In a production build the UI
+// must reflect the real daemon: real parsed servers, real empty states, real
+// errors — never fabricated data (fake servers hide a broken subscription and
+// mislead the operator). import.meta.env.DEV is true under the vite dev server
+// and vitest, false in the shipped bundle, so mock fallback is compiled out of
+// the binary the router runs.
+const USE_MOCKS = import.meta.env.DEV
+
 /** Fired when the API returns 401 so the router can send the user to /login. */
 export const UNAUTHORIZED_EVENT = 'keen:unauthorized'
 
@@ -90,6 +98,10 @@ async function withMock<T>(
     return await fn()
   } catch (err) {
     if (err instanceof UnauthorizedError) throw err
+    // Production: surface the real failure to react-query (pages render their
+    // empty/error state, contained by the per-route ErrorBoundary) instead of
+    // papering over it with fake data.
+    if (!USE_MOCKS) throw err
     return typeof fallback === 'function' ? (fallback as () => T)() : fallback
   }
 }
@@ -103,6 +115,7 @@ async function withOk<T extends object>(
     return await fn()
   } catch (err) {
     if (err instanceof UnauthorizedError) throw err
+    if (!USE_MOCKS) throw err
     return typeof fallback === 'function' ? (fallback as () => T)() : fallback
   }
 }

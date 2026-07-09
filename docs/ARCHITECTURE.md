@@ -284,7 +284,7 @@ failed apply**, not a router you have to physically reset.
   `platform.Runner` that is dry-run aware, so the same code path is inert in
   tests and off-device, and auditable in logs on-device.
 - **LAN-bound UI, outside the tunnel.** The web UI binds to the LAN (default
-  port `8088`) and is explicitly excluded from capture via the bypass ranges, so
+  port `47115`) and is explicitly excluded from capture via the bypass ranges, so
   a broken VPN/proxy can never lock you out of the manager.
 - **Only writes under `/opt`.** No firmware partition is ever touched. Uninstall
   is a matter of removing files under `/opt` (see `scripts/uninstall.sh`).

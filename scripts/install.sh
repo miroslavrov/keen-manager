@@ -14,14 +14,14 @@
 #   KEEN_VERSION  release tag to install       (default: latest)
 #   KEEN_URL      full URL to the .gz binary   (overrides REPO/KEEN_VERSION/ARCH)
 #   KEEN_ARCH     force arch (mipsle|mips|arm64|arm), skip detection
-#   KEEN_PORT     web UI port to print         (default 8088)
+#   KEEN_PORT     web UI port to print         (default 47115)
 
 set -e
 
 # --- Constants --------------------------------------------------------------
 REPO="${REPO:-miroslavrov/keen-manager}"
 KEEN_VERSION="${KEEN_VERSION:-latest}"
-KEEN_PORT="${KEEN_PORT:-8088}"
+KEEN_PORT="${KEEN_PORT:-47115}"
 
 BIN_DIR="/opt/bin"
 BIN_PATH="${BIN_DIR}/keen-manager"

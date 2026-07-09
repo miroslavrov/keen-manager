@@ -392,7 +392,7 @@ export const mockAuth: AuthState = {
 }
 
 export const mockSettings: Settings = {
-  port: 8088,
+  port: 47115,
   auth_enabled: false,
   theme: 'dark',
   backup_on_change: true,

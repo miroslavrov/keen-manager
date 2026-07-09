@@ -23,7 +23,7 @@ export default defineConfig({
     proxy: {
       // During `vite dev`, forward API + SSE to the local Go daemon.
       '/api': {
-        target: 'http://127.0.0.1:8088',
+        target: 'http://127.0.0.1:47115',
         changeOrigin: true,
       },
     },

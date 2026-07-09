@@ -17,7 +17,7 @@ func DefaultState() model.State {
 			ProbeTarget:      "https://www.gstatic.com/generate_204",
 		},
 		Settings: model.Settings{
-			Port:                  8088,
+			Port:                  47115,
 			AuthEnabled:           false,
 			Theme:                 "dark",
 			BackupOnChange:        true,
@@ -34,7 +34,7 @@ func migrate(s *model.State) {
 		s.Version = SchemaVersion
 	}
 	if s.Settings.Port == 0 {
-		s.Settings.Port = 8088
+		s.Settings.Port = 47115
 	}
 	if s.Failover.CheckIntervalS == 0 {
 		s.Failover.CheckIntervalS = 30

@@ -101,7 +101,7 @@ curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scrip
 
 The installer detects your architecture, installs the right binary to
 `/opt/bin/keen-manager`, sets up the init script and ndm hook, and prints the web
-UI address (default `http://<router-lan-ip>:8088`).
+UI address (default `http://<router-lan-ip>:47115`).
 
 **Upgrade:** re-run the same command (the binary is replaced atomically and the
 service restarts). **Uninstall:** `curl -fsSL .../scripts/uninstall.sh | sh`
@@ -283,7 +283,7 @@ curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scrip
 
 Установщик определит архитектуру, поставит нужный бинарь в
 `/opt/bin/keen-manager`, настроит init-скрипт и ndm-хук и выведет адрес
-веб-морды (по умолчанию `http://<LAN-IP-роутера>:8088`).
+веб-морды (по умолчанию `http://<LAN-IP-роутера>:47115`).
 
 **Обновление:** повтори ту же команду (бинарь заменится атомарно, сервис
 перезапустится). **Удаление:** `curl -fsSL .../scripts/uninstall.sh | sh`

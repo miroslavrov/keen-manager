@@ -70,10 +70,10 @@ jobs:
 
             The installer auto-detects your router architecture (mipsle / mips / arm64 / arm),
             downloads the matching binary below, installs the init script, and starts the
-            daemon. Then open the web UI at **http://ROUTER_IP:8088**.
+            daemon. Then open the web UI at **http://ROUTER_IP:47115**.
 
             Установщик сам определит архитектуру роутера, скачает нужный бинарь,
-            поставит init-скрипт и запустит демон. Веб-интерфейс — **http://IP_РОУТЕРА:8088**.
+            поставит init-скрипт и запустит демон. Веб-интерфейс — **http://IP_РОУТЕРА:47115**.
 
             ### Обновление / Upgrade
 
