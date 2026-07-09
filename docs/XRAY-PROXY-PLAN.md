@@ -6,8 +6,11 @@
 > только конфиг Xray под капотом; интерфейс в роутере не трогается. Маршруты вешаются
 > на `ProxyN` штатным `dns-proxy route`, как для AWG.
 
-Status: **implemented in the backend (session 8); session 9 fixed a routing-loop
-regression; still pending on-device validation of the RCI shape.**
+Status: **implemented in the backend (session 8); session 9 removed `ip global`;
+session 13 confirmed the on-device root cause (a `security-level public` proxy
+interface is auto-enrolled into internet-access + DNS) and landed the full fix
+(LAN zone + `ip global`/`name-servers` off + heal-in-place reconcile). Pending
+on-device confirmation that a hardened ProxyN still forwards routed domains.**
 Written session 7 (2026-07-09); implemented session 8. The engine now defaults to
 this proxy-connection model on capable firmware; TPROXY remains the fallback.
 
@@ -266,17 +269,33 @@ reconciled/torn down after a restart. Persisted like `NativeIfaces`.
 - Loopback SOCKS: the router's proxy client connecting to `127.0.0.1:10808` (its own
   keen-manager) — confirm `proxy connect via any` works for loopback (expected).
 - Component gate: cleanly detect "Proxy client" presence and fall back to TPROXY.
-- **Routing loop (FIXED session 9, but re-check on-device):** a SOCKS-proxy
-  interface must NOT be the default connection (`ip global`). Unlike WG, it has
-  no endpoint pinning, so a default `ProxyN` loops the router's own DNS +
-  Xray-upstream back through itself (and kills UDP DNS). `ProxyN` is now a
-  routing target only. **Open question for the read-back:** does a `dns-proxy
-  route → ProxyN` still forward when the interface is NOT marked "use for
-  internet access"? If the firmware requires the flag, the correct wiring is
-  "eligible for internet but LOWEST priority" (WAN stays default) — capture the
-  exact `ip global`/priority shape from the user's working manual proxy (§3) and
-  wire it at low priority, PLUS pin a host-route to the active server IP via the
-  WAN as belt-and-suspenders against the loop.
+- **Routing loop (root cause confirmed on-device, session 13):** a SOCKS-proxy
+  interface must NOT be a default/internet-access connection. Removing `ip
+  global` in session 9 was necessary but NOT sufficient. The session-13 read-back
+  (`show/rc/interface/Proxy0`) showed the managed interface as
+  `security-level {public:true}` + `ip name-servers:true` + `up`, with NO `ip
+  global` — yet the whole LAN + the router itself were still being swallowed into
+  the tunnel. On KeeneticOS 5.1.0 a **connected `security-level public` Proxy
+  interface is auto-enrolled into internet-access (default-route) selection**
+  regardless of the `ip global` flag (which is why the user's "use for internet
+  access" checkbox appeared stuck — the interface was already in the group), and
+  a public internet iface also gets **`ip name-servers`**, routing the router's
+  DNS through the dead TCP-only SOCKS. Together that (a) blackholed all LAN
+  traffic, (b) hung all DNS system-wide, and (c) looped Xray's OWN upstream to
+  the vless server back through ProxyN, so the tunnel could never come up
+  (`curl -x socks5h://127.0.0.1:10808` hung). **Fix (session 13, in `main`):**
+  `proxyInterfaceBody` now pins `ip global:false` + `ip name-servers:false` and
+  creates the interface in a **LAN zone (`security-level private`)** — a
+  per-domain routing TARGET, not a WAN uplink; `keenetic.HardenProxyInterface`
+  re-asserts that shape on an already-created interface (heals earlier installs
+  without recreating it / churning its routes), driven by
+  `engine.reconcileProxyIface()` on boot and by `ensureManagedProxyIface` on
+  activate. **Still to confirm on-device (the user runs it):** that after
+  hardening a `dns-proxy route → ProxyN` still forwards the selected domains (a
+  private-zone route target should, since Xray does the real WAN egress). If a
+  private zone turns out NOT to forward, the fallback is `public` + explicit
+  removal from internet-access priority; capture which lever works and, as
+  belt-and-suspenders, pin a host-route to the active server IP via the WAN.
 
 ## 7. Code map (files to touch)
 - NEW `internal/keenetic/proxyiface.go` (+ `_test.go`) — Proxy interface RCI.

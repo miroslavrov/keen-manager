@@ -153,6 +153,12 @@ func (e *Engine) Start(ctx context.Context) {
 		case <-time.After(3 * time.Second): // let the WAN settle first
 		}
 		e.reconcile()
+		// Re-assert the managed Xray Proxy interface's anti-hijack shape (ip
+		// global/name-servers off, LAN zone) so an install from an earlier build
+		// stops swallowing the router's whole egress into the SOCKS tunnel, even
+		// if reconcile() found the active tunnel already "healthy" and skipped a
+		// re-activation. See proxyconn.go / docs/XRAY-PROXY-PLAN.md §6.
+		e.reconcileProxyIface()
 		// Re-establish the DPI-bypass exit point (tpws + its managed Proxy
 		// interface) if the feature was on before the restart, then re-apply any
 		// service routes whose target tunnel/interface is back up.

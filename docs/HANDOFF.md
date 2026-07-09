@@ -1,6 +1,6 @@
 # Handoff — keen-manager (для следующего агента)
 
-Обновлено: 2026-07-10 (**12-я сессия**). Репозиторий: `github.com/miroslavrov/keen-manager`,
+Обновлено: 2026-07-10 (**13-я сессия**). Репозиторий: `github.com/miroslavrov/keen-manager`,
 ветка `main`. Коммиты от лица **miroslavrov** (git-credentials уже в песочнице; токен
 пользователь передаёт отдельно, в репозиторий НЕ коммитить). Пользователь на **KeeneticOS**
 (прошивка отдаёт release-строку `"5.01.C.0.0-1"`, это 5.1.0), arch **arm64**, тестирует
@@ -11,7 +11,75 @@
 
 ---
 
-## 0. Сессии 5–12 — что сделано и что осталось
+## 0. Сессии 5–13 — что сделано и что осталось
+
+### 13-я сессия (В РАБОТЕ) — НАЙДЕН корень P0-хайджека (данные с устройства наконец пришли)
+Юзер прислал **on-device read-back** (то, чего ждали все сессии с 8-й — облачная
+песочница LAN роутера не видит). Его жалоба: при включённом Xray-туннеле **весь**
+трафик (и со сплит-роутами, и без) утягивается в туннель, ничего кроме локальных
+IP не грузится; как только подключение падает — сразу всё ок.
+
+**Данные с роутера (KeeneticOS 5.1.0, arm64):**
+- Единственный Proxy-интерфейс — `Proxy0` (description «keen-manager (Xray)»),
+  upstream `127.0.0.1:10808`, `up:true`, **`security-level {public:true}`**,
+  **`ip.name-servers:true`**. `ip global` НЕТ (фикс 9-й на месте). `Proxy1` не
+  существует. `curl -x socks5h://127.0.0.1:10808 https://api.ipify.org` — **висит**
+  (туннель НЕ несёт трафик). `curl https://api.ipify.org` НАПРЯМУЮ с роутера —
+  тоже **висит**. `tpws` в opkg-фидах **НЕТ** (для P1-обхода — отдельно).
+
+**Корень (диагноз):** снятие `ip global` в 9-й было НЕОБХОДИМО, но НЕ достаточно.
+На 5.1.0 **подключённый `security-level public` Proxy-интерфейс сам попадает в
+приоритет интернет-доступа (кандидат в дефолт-роут)** независимо от флага `ip
+global` (потому у юзера галочка «выход в интернет» и «не прожималась» — интерфейс
+уже в группе), а публичному интернет-интерфейсу вешается **`ip name-servers`** →
+DNS роутера идёт через дохлый TCP-only SOCKS. Итог: (a) весь LAN в чёрную дыру,
+(b) весь DNS висит, (c) собственный аплинк Xray к vless-серверу заворачивается
+обратно в ProxyN — петля, туннель не поднимается. Это ровно жалоба юзера.
+
+**Фикс (в `main`, слайс `fix(engine)`):**
+- `keenetic/proxyiface.go::proxyInterfaceBody` теперь пиннит **`ip global:false`
+  + `ip name-servers:false`** и создаёт интерфейс в **LAN-зоне
+  (`security-level private`)** — это цель для per-domain маршрутов, НЕ WAN-аплинк.
+- Новый `keenetic.HardenProxyInterface` перезакрепляет эту форму на УЖЕ созданном
+  интерфейсе (лечит инсталлы прошлых билдов БЕЗ пересоздания — маршруты на нём
+  выживают). Зовётся из `engine.reconcileProxyIface()` на бут и из
+  `ensureManagedProxyIface` на активации (для новых и существующих ProxyN).
+- Юнит-тесты обновлены (`TestCreateProxyInterfaceBody` + новый
+  `TestHardenProxyInterface`). Сборка зелёная: `go build/vet/test` + кросс
+  mipsle/arm64. Веб не трогался (CI-гард бандла не затронут).
+
+⚠️ **НА ЮЗЕРЕ (снять с устройства, команды — в конце этого блока):** подтвердить,
+что после hardening (1) интернет на ПК возвращается при поднятом туннеле, и
+(2) `dns-proxy route → ProxyN` всё ещё гонит ВЫБРАННЫЕ домены в туннель (private-
+зона как route-target должна работать — реальный WAN-выход делает Xray). Если
+private НЕ форвардит — фолбэк `public` + явное удаление из приоритета интернета;
+снять, какой рычаг сработал. Плюс проверить, поднялся ли сам туннель после снятия
+петли (`curl -x socks5h://127.0.0.1:10808 https://api.ipify.org` должен вернуть IP
+СЕРВЕРА). Если и без петли туннель молчит — это уже DPI по reality/TLS (отдельный
+корень: `xray -test` + логи `xray run`, сменить probe-target).
+
+#### P0-ЭКСПЕРИМЕНТ 13-й (on-device, туннель ВКЛючён) — подтвердить фикс вживую
+```sh
+B=http://localhost:79/rci
+# 0) снапшот ДО
+curl -s $B/show/rc/interface/Proxy0; echo
+curl -s $B/show/ip/route | grep -iE 'default|0\.0\.0\.0|Proxy'; echo
+ps w | grep -i '[x]ray'; (netstat -ltnp 2>/dev/null||ss -ltnp 2>/dev/null)|grep 10808
+# 1) DNS-хайджек vs роут-хайджек: raw-IP (без DNS) против имени
+curl -s -m 8 -o /dev/null -w 'raw-ip=%{http_code} t=%{time_total}\n' https://1.1.1.1/
+curl -s -m 8 -o /dev/null -w 'by-name=%{http_code} t=%{time_total}\n' https://api.ipify.org/
+# 2) ПРИМЕНИТЬ ФИКС вживую (то же, что делает код): LAN-зона + global/name-servers off
+curl -s $B/ -H 'Content-Type: application/json' \
+  -d '{"interface":{"Proxy0":{"security-level":"private","ip":{"global":false,"name-servers":false}}}}'; echo
+curl -s $B/ -H 'Content-Type: application/json' -d '{"system":{"configuration":{"save":{}}}}'; echo
+# 3) ПОВТОРИТЬ проверку — интернет на роутере должен вернуться при живом ProxyN
+curl -s -m 8 -o /dev/null -w 'after by-name=%{http_code} t=%{time_total}\n' https://api.ipify.org/
+curl -s -x socks5h://127.0.0.1:10808 -m 12 https://api.ipify.org; echo  # IP СЕРВЕРА?
+# 4) РЕВЕРТ (если что-то не так) — вернуть public:
+#   curl -s $B/ -H 'Content-Type: application/json' \
+#     -d '{"interface":{"Proxy0":{"security-level":"public"}}}'; \
+#   curl -s $B/ -H 'Content-Type: application/json' -d '{"system":{"configuration":{"save":{}}}}'
+```
 
 ### 12-я сессия (ЗАКРЫТА) — CLI + качество failover + nfqws2-паритет + дашборд; rc.2
 Только код-сайд полировка к стабильной (LAN роутера из облачной песочницы

@@ -28,6 +28,15 @@ const (
 
 	// proxyIfaceDescription labels the managed interface in the Keenetic UI.
 	proxyIfaceDescription = "keen-manager (Xray)"
+
+	// proxyIfaceSecurityLevel is the security zone the managed Proxy interface is
+	// created in. It is deliberately a LAN zone ("private"), NOT "public": the
+	// interface is a per-domain routing TARGET reached from the LAN, not a WAN
+	// uplink. A "public" proxy interface is auto-enrolled by KeeneticOS into
+	// internet-access (default-route) selection, which hijacks the router's whole
+	// egress + DNS into the SOCKS tunnel (the on-device P0 bug — see
+	// ensureManagedProxyIface and docs/XRAY-PROXY-PLAN.md §6).
+	proxyIfaceSecurityLevel = "private"
 )
 
 // xrayMode resolves how an Xray connection is wired to the router, honouring
@@ -100,12 +109,20 @@ func (e *Engine) ensureManagedProxyIface() (string, error) {
 	if e.keenetic == nil || e.runner.DryRun {
 		return "", nil
 	}
-	if name := e.managedProxyIface(); name != "" {
-		return name, nil
-	}
 
 	ctx, cancel := context.WithTimeout(e.baseCtx(), 30*time.Second)
 	defer cancel()
+
+	// Reuse path: the interface already exists (this install or a prior one).
+	// Re-assert the anti-hijack invariant so an interface created by an EARLIER
+	// build — which made it security-level public and inherited the firmware's
+	// default DNS routing, hijacking the router's whole egress — is healed in
+	// place, without recreating it (which would churn the dns-proxy routes bound
+	// to it).
+	if name := e.managedProxyIface(); name != "" {
+		e.hardenManagedProxyIface(ctx, name)
+		return name, nil
+	}
 
 	idx, err := keenetic.FindFreeProxyIndex(ctx, e.keenetic)
 	if err != nil {
@@ -116,29 +133,33 @@ func (e *Engine) ensureManagedProxyIface() (string, error) {
 		Upstream:      xraySocksHost,
 		Port:          xraySocksPort,
 		Protocol:      "socks5",
-		SecurityLevel: "public",
+		SecurityLevel: proxyIfaceSecurityLevel,
 		Description:   proxyIfaceDescription,
 		Up:            true,
 	}
 	if err := keenetic.CreateProxyInterface(ctx, e.keenetic, name, cfg); err != nil {
 		return "", err
 	}
-	// IMPORTANT — do NOT mark ProxyN as a global/default internet connection
-	// ("ip global" / the "use for internet access" checkbox). A SOCKS-proxy
-	// interface is a per-domain routing TARGET, not a default route.
+	// IMPORTANT — the managed ProxyN is a per-service routing TARGET, never the
+	// router's default/global internet connection ("ip global" / the "use for
+	// internet access" checkbox / a "public" WAN security zone).
 	//
 	// Unlike a WireGuard kernel tunnel — whose server endpoint stays reachable
 	// over the WAN because NDMS pins an endpoint host-route — a proxy interface
-	// has no endpoint pinning. If ProxyN became the default, the router's OWN
+	// has no endpoint pinning. If ProxyN became a default route, the router's OWN
 	// egress (UDP DNS resolution + Xray's TCP connection out to the vless server)
 	// would be sent into ProxyN → the local SOCKS 127.0.0.1:10808 → Xray → and,
 	// having no other default, straight back into ProxyN: a tight routing loop.
 	// SOCKS is also TCP-only, so UDP DNS through it dies outright. That is the
-	// "it storms / no site loads / without a policy it swallows all traffic"
-	// failure reported on-device. Traffic must reach the tunnel ONLY through
-	// explicit dns-proxy routes bound to ProxyN (the Routes page), exactly like
-	// AWG's per-service routes; the WAN stays the default so DNS and Xray's own
-	// upstream egress normally. See docs/XRAY-PROXY-PLAN.md §6 (routing loop).
+	// on-device "it swallows all traffic / no site loads / only local IPs work"
+	// report. CreateProxyInterface already pins ip global=off + name-servers=off
+	// in a LAN zone; hardenManagedProxyIface re-asserts it (idempotent — and it
+	// is the same call that heals pre-existing interfaces above). Traffic reaches
+	// the tunnel ONLY through explicit dns-proxy routes bound to ProxyN (the
+	// Routes page), exactly like AWG's per-service routes; the WAN stays the
+	// default so DNS and Xray's own upstream egress normally. See
+	// docs/XRAY-PROXY-PLAN.md §6 (routing loop).
+	e.hardenManagedProxyIface(ctx, name)
 	if err := e.recordManagedProxyIface(name); err != nil {
 		e.Logf("proxy-conn: warning: could not persist managed proxy iface %s: %v", name, err)
 	}
@@ -147,6 +168,46 @@ func (e *Engine) ensureManagedProxyIface() (string, error) {
 	}
 	e.Logf("proxy-conn: registered %s → SOCKS %s:%d as a per-service routing target (route domains to it on the Routes page; it is deliberately NOT the default connection — that would loop the router's own DNS/Xray-upstream; firmware %s)", name, xraySocksHost, xraySocksPort, e.caps.Release)
 	return name, nil
+}
+
+// hardenManagedProxyIface re-asserts the anti-hijack invariant on the managed
+// Proxy interface (ip global off, ip name-servers off, LAN security zone) and
+// persists it. Best-effort: a rejected write is logged, not fatal — the
+// interface still exists and routes still bind to it, and the user can adjust
+// the zone/priority from the Keenetic UI. See ensureManagedProxyIface and
+// docs/XRAY-PROXY-PLAN.md §6.
+func (e *Engine) hardenManagedProxyIface(ctx context.Context, name string) {
+	if e.keenetic == nil || e.runner.DryRun || name == "" {
+		return
+	}
+	if err := keenetic.HardenProxyInterface(ctx, e.keenetic, name, proxyIfaceSecurityLevel); err != nil {
+		e.Logf("proxy-conn: warning: could not harden %s against the internet-access hijack (%v) — if the whole LAN routes into the tunnel, move %s to a LAN zone and remove it from internet-access priority in the Keenetic UI", name, err, name)
+		return
+	}
+	if err := e.keenetic.Save(ctx); err != nil {
+		e.Logf("proxy-conn: warning: RCI save after hardening %s failed: %v", name, err)
+	}
+}
+
+// reconcileProxyIface re-asserts the anti-hijack invariant on the managed Proxy
+// interface after a daemon restart / router reboot — even when the active tunnel
+// verified healthy (so reconcile() did not re-activate and thus did not call
+// ensureManagedProxyIface). This heals an install created by an earlier build
+// (ProxyN security-level public + the firmware's default DNS routing, which
+// hijacked the router's whole egress) on the next start, without waiting for a
+// re-activation. No-op off-device / dry-run / when no managed interface exists.
+func (e *Engine) reconcileProxyIface() {
+	if e.keenetic == nil || e.runner.DryRun {
+		return
+	}
+	name := e.managedProxyIface()
+	if name == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(e.baseCtx(), 30*time.Second)
+	defer cancel()
+	e.hardenManagedProxyIface(ctx, name)
+	e.Logf("proxy-conn: reconciled %s shape after restart (per-service routing target; not an internet-access uplink)", name)
 }
 
 // teardownManagedProxyIfaceIfUnused removes the shared Proxy interface once no

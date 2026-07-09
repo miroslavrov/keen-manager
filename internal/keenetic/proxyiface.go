@@ -21,21 +21,29 @@ import (
 // exit point the same reversible way it treats a WireguardN one.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// RCI SHAPE — VALIDATE ON-DEVICE BEFORE TRUSTING (see docs/XRAY-PROXY-PLAN.md §3)
+// RCI SHAPE — informed by an on-device read-back (session 13); still degrades
+// safely (see docs/XRAY-PROXY-PLAN.md §3/§6)
 // ─────────────────────────────────────────────────────────────────────────────
 // The Keenetic CLI documents the config-interface commands (proxy upstream
 // <host> [<port>]; proxy protocol socks5; proxy connect; interface
-// security-level public; up) but NOT the RCI JSON nesting. The user already
-// created a Proxy connection by hand, so the authoritative shape is a read-back:
+// security-level …; up) but NOT the RCI JSON nesting. A read-back of the managed
+// interface on the user's live router (KeeneticOS 5.1.0, arm64) was:
 //
-//	curl -s http://localhost:79/rci/show/rc/interface/Proxy0
+//	# curl -s http://localhost:79/rci/show/rc/interface/Proxy0
+//	{"description":"keen-manager (Xray)","security-level":{"public":true},
+//	 "ip":{"mtu":"1500","name-servers":true},
+//	 "proxy":{"upstream":{"host":"127.0.0.1","port":"10808"}},"up":true}
 //
-// proxyInterfaceBody below encodes the best-guess shape from the plan. It is
-// isolated in one function precisely so it is trivial to correct once the
-// read-back is captured. The engine treats a rejected write (RCI error
-// envelope) as "Proxy client unavailable" and falls back to TPROXY, so shipping
-// this guess cannot brick the router — worst case it degrades to the existing
-// working path with a logged hint.
+// That confirmed the upstream/description/up nesting AND pinpointed the P0
+// routing bug: a connected, security-level-public Proxy interface is
+// auto-enrolled by the firmware into internet-access (default-route) selection
+// and handed ip name-servers — so it swallowed the entire LAN's traffic and the
+// router's own DNS into the SOCKS tunnel, which (looping its own upstream back
+// through itself) then carried nothing. proxyInterfaceBody now pins the
+// anti-hijack invariant (ip global off, ip name-servers off, LAN security zone)
+// so the interface is a per-domain routing TARGET only. It is isolated in one
+// function so the shape stays trivial to correct; a rejected write still
+// surfaces as an error → the engine falls back to TPROXY with a logged hint.
 
 // ProxyInterfaceName returns the canonical RCI interface name for index n, e.g.
 // ProxyInterfaceName(0) == "Proxy0".
@@ -102,7 +110,12 @@ type ProxyConfig struct {
 	// (TCP-only); DNS/UDP through the proxy may additionally need DoT/DoH or a
 	// udpgw upstream — see docs/XRAY-PROXY-PLAN.md §2.
 	UDP bool
-	// SecurityLevel is the interface zone: "public" for internet egress.
+	// SecurityLevel is the interface security zone. keen-manager uses a LAN zone
+	// ("private"), NOT "public": the managed proxy is a per-domain routing TARGET
+	// reached from the LAN, not a WAN uplink. A "public" proxy interface is
+	// auto-enrolled by KeeneticOS into internet-access (default-route) selection,
+	// which hijacks the whole router into the SOCKS tunnel — see
+	// engine/proxyconn.go and docs/XRAY-PROXY-PLAN.md §6.
 	SecurityLevel string
 	Description   string
 	// Up brings the interface up and starts it connecting on creation.
@@ -135,6 +148,23 @@ func proxyInterfaceBody(cfg ProxyConfig) map[string]any {
 	body := map[string]any{
 		"proxy": proxy,
 		"up":    cfg.Up,
+		// Anti-hijack invariant (see engine/proxyconn.go + docs/XRAY-PROXY-PLAN.md
+		// §6). The managed Proxy is a per-domain ROUTE TARGET, never the router's
+		// internet uplink. Two KeeneticOS behaviours would otherwise turn a
+		// connected proxy interface into a default route for the whole LAN AND the
+		// router itself:
+		//   • ip global       — enrols the interface in internet-access priority
+		//                        (default-route selection). A SOCKS proxy has no
+		//                        server-endpoint pinning, so as a default it loops
+		//                        the router's own DNS + Xray's server-upstream back
+		//                        through itself. Force it OFF.
+		//   • ip name-servers  — routes the router's DNS resolution through the
+		//                        interface; over a TCP-only SOCKS that has stalled
+		//                        that hangs every lookup system-wide. Force it OFF.
+		"ip": map[string]any{
+			"global":       false,
+			"name-servers": false,
+		},
 	}
 	if cfg.Description != "" {
 		body["description"] = cfg.Description
@@ -143,6 +173,37 @@ func proxyInterfaceBody(cfg ProxyConfig) map[string]any {
 		body["security-level"] = cfg.SecurityLevel
 	}
 	return body
+}
+
+// HardenProxyInterface re-applies the anti-hijack invariant to an EXISTING
+// managed Proxy interface: force ip global off, ip name-servers off, and (when
+// given) move it to a non-WAN security zone. keen-manager creates the interface
+// only once and reuses it across server switches, so installs made by an earlier
+// build still carry the hijacking shape (security-level public + the firmware's
+// default ip name-servers). This heals them in place on the next daemon start
+// WITHOUT recreating the interface — recreation would churn the dns-proxy routes
+// bound to it. Best-effort and fully reversible; a rejected write is returned so
+// the caller can log and carry on.
+func HardenProxyInterface(ctx context.Context, c *Client, name, securityLevel string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("keenetic: harden proxy interface: empty name")
+	}
+	body := map[string]any{
+		"ip": map[string]any{
+			"global":       false,
+			"name-servers": false,
+		},
+	}
+	if lvl := strings.TrimSpace(securityLevel); lvl != "" {
+		body["security-level"] = lvl
+	}
+	_, err := c.Post(ctx, map[string]any{
+		"interface": map[string]any{name: body},
+	})
+	if err != nil {
+		return fmt.Errorf("keenetic: harden proxy interface %s: %w", name, err)
+	}
+	return nil
 }
 
 // CreateProxyInterface creates (or reconfigures, if it already exists) a Proxy
