@@ -16,6 +16,29 @@ AWG2).
 
 ---
 
+## Session 9 — on-device bug fixes (Xray proxy loop; route editing)
+
+- [x] **Routing-loop fix (`fix(engine)`).** The managed `ProxyN` (SOCKS exit
+  point) is no longer marked `ip global`/"use for internet access". Marking a
+  SOCKS-proxy interface as the default connection looped the router's own DNS +
+  Xray server-upstream back through the proxy (no endpoint pinning, unlike WG),
+  and TCP-only SOCKS dropped UDP DNS — the on-device "storms / flaps / nothing
+  loads / swallows all traffic" report. `ProxyN` is now a per-service routing
+  target only (reached via explicit `dns-proxy route`, like AWG). AWG unchanged.
+- [x] **Route editing (`feat(routes)`).** `GET /api/routes/{id}` returns the full
+  domain/subnet membership; `PUT /api/routes/{id}` (`Engine.UpdateRoute`) edits
+  name / domains / subnets / target and re-applies with a clean teardown of the
+  old form. Unit-tested. Web editor UI pending the bundle rebuild.
+- [ ] **Web (blocked on npm registry):** land the Xray-integration toggle
+  (`wip/web-xray-toggle`, 4 web files only) + a route editor (open a rule with
+  all its domains, edit, save). Needs `RequestNetworkAccess(registry.npmjs.org)`.
+- [ ] **Proxy "use for internet" flag / exact RCI shape:** needs a device
+  read-back (do not guess). If `dns-proxy route → ProxyN` needs the flag, wire it
+  at LOWEST priority (WAN stays default) + pin a host-route to the server IP.
+- [ ] **nfqws domain selection ("like proxy"):** needs the user's default domain
+  lists (do not invent) + scope confirmation (UI surface; nfqws has no tunnel
+  interface — it desyncs on the direct path via NFQUEUE).
+
 ## Session 8 — Xray as a single KeeneticOS "Proxy connection" (one exit point)
 
 - [~] **Xray wired as ONE visible KeeneticOS Proxy connection** (SOCKS5),

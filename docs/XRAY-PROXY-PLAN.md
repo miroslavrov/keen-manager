@@ -6,9 +6,24 @@
 > только конфиг Xray под капотом; интерфейс в роутере не трогается. Маршруты вешаются
 > на `ProxyN` штатным `dns-proxy route`, как для AWG.
 
-Status: **implemented in the backend (session 8), pending on-device validation.**
+Status: **implemented in the backend (session 8); session 9 fixed a routing-loop
+regression; still pending on-device validation of the RCI shape.**
 Written session 7 (2026-07-09); implemented session 8. The engine now defaults to
 this proxy-connection model on capable firmware; TPROXY remains the fallback.
+
+⚠️ Session 9 — routing-loop root cause found & fixed (in main, `fix(engine)`):
+the managed `ProxyN` was being marked `ip global` ("use for internet access")
+on creation and on every activate. That is correct for a WireGuard kernel tunnel
+(NDMS pins a host-route to the WG endpoint, so the server stays reachable over
+the WAN) but WRONG for a SOCKS-proxy interface, which has no endpoint pinning:
+once `ProxyN` is the default, the router's OWN egress (UDP DNS + Xray's TCP
+connection to the vless server) is sent into `ProxyN` → local SOCKS → Xray →
+back into `ProxyN` = a routing loop, and TCP-only SOCKS drops UDP DNS outright.
+That is the user's on-device report ("it storms / connection flaps / no site
+loads / with no policy it swallows all traffic"). Fix: `ProxyN` is now a
+per-service routing TARGET only (reached via explicit dns-proxy routes, like
+AWG); it is no longer marked global, so the WAN stays the default and the loop
+cannot form. See §6.
 
 Session 8 — what landed (all in main):
 - `internal/xray/config.go` — `Options.ProxyConnMode`: a minimal SOCKS-only
@@ -251,6 +266,17 @@ reconciled/torn down after a restart. Persisted like `NativeIfaces`.
 - Loopback SOCKS: the router's proxy client connecting to `127.0.0.1:10808` (its own
   keen-manager) — confirm `proxy connect via any` works for loopback (expected).
 - Component gate: cleanly detect "Proxy client" presence and fall back to TPROXY.
+- **Routing loop (FIXED session 9, but re-check on-device):** a SOCKS-proxy
+  interface must NOT be the default connection (`ip global`). Unlike WG, it has
+  no endpoint pinning, so a default `ProxyN` loops the router's own DNS +
+  Xray-upstream back through itself (and kills UDP DNS). `ProxyN` is now a
+  routing target only. **Open question for the read-back:** does a `dns-proxy
+  route → ProxyN` still forward when the interface is NOT marked "use for
+  internet access"? If the firmware requires the flag, the correct wiring is
+  "eligible for internet but LOWEST priority" (WAN stays default) — capture the
+  exact `ip global`/priority shape from the user's working manual proxy (§3) and
+  wire it at low priority, PLUS pin a host-route to the active server IP via the
+  WAN as belt-and-suspenders against the loop.
 
 ## 7. Code map (files to touch)
 - NEW `internal/keenetic/proxyiface.go` (+ `_test.go`) — Proxy interface RCI.
