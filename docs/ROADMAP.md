@@ -16,6 +16,40 @@ AWG2).
 
 ---
 
+## Session 8 — Xray as a single KeeneticOS "Proxy connection" (one exit point)
+
+- [~] **Xray wired as ONE visible KeeneticOS Proxy connection** (SOCKS5),
+  the user's actual goal — implemented in the backend, pending on-device
+  validation. keen-manager registers one managed `ProxyN` → its local Xray
+  SOCKS inbound `127.0.0.1:10808`; switching server / "select best" rewrites
+  ONLY the Xray config under the hood, so the router keeps showing one stable
+  connection. Per-service routing binds to `ProxyN` via the same `dns-proxy
+  route` stack as native AWG (the in-Xray split from beta.6/7 is used only in
+  the TPROXY fallback now). New `Settings.XrayIntegration` (auto|proxy|tproxy,
+  default auto → proxy when the Proxy client component is present, else tproxy);
+  `State.ManagedProxyIface`. TPROXY stays fully working as the fallback, and a
+  rejected Proxy-interface RCI write degrades to it automatically (logged) so a
+  wrong shape can never strand the router. Slices: `xray` SOCKS-only config,
+  `keenetic` Proxy-interface RCI + capability, `engine` apply/routes/connections
+  wiring. All unit-tested; `go build/vet/test` + mipsle/arm64 cross green.
+- [ ] **On-device validation (session 8 — top priority):** (a) read back the
+  real RCI shape of the user's hand-made Proxy connection
+  (`curl .../rci/show/rc/interface/Proxy0`) and reconcile it with
+  `keenetic/proxyiface.go::proxyInterfaceBody` (best-guess shape — the ONE spot
+  to correct); (b) activate an Xray server → confirm a single `ProxyN` appears
+  in Other Connections → Proxy, upstream `127.0.0.1:10808`, socks5, connected;
+  (c) switch server → same `ProxyN`, exit IP changes; (d) a Route on the Xray
+  connection creates `dns-proxy route → ProxyN` and only those domains tunnel;
+  (e) delete the last Xray connection → `ProxyN` removed. See
+  `docs/XRAY-PROXY-PLAN.md` §5.
+- [ ] **Web Settings toggle for Xray integration** (auto/proxy/tproxy): page +
+  types + i18n + mocks are written but the embedded bundle could NOT be rebuilt
+  this session (npm registry blocked in the sandbox). Rebuild
+  `internal/webui/dist` (Node 24) and commit it in the same commit before it
+  ships in the UI (CI guard). The backend works without it (auto-detect + API).
+
+---
+
 ## Session 7 — Xray activation fix + per-service Xray routing + one exit point
 
 - [x] **Xray activation no longer fails on config format** (fix 572827c). The

@@ -1,6 +1,6 @@
 # Handoff — keen-manager (для следующего агента)
 
-Обновлено: 2026-07-09 (**7-я сессия**). Репозиторий: `github.com/miroslavrov/keen-manager`,
+Обновлено: 2026-07-09 (**8-я сессия**). Репозиторий: `github.com/miroslavrov/keen-manager`,
 ветка `main`. Коммиты от лица **miroslavrov** (git-credentials уже в песочнице; токен
 пользователь передаёт отдельно, в репозиторий НЕ коммитить). Пользователь на **KeeneticOS**
 (прошивка отдаёт release-строку `"5.01.C.0.0-1"`, это 5.1.0), arch **arm64**, тестирует
@@ -11,24 +11,57 @@
 
 ---
 
-## 0. Сессии 5–7 — что сделано и что осталось
+## 0. Сессии 5–8 — что сделано и что осталось
 
-### 🔴 ГЛАВНЫЙ ПРИОРИТЕТ СЛЕДУЮЩЕЙ СЕССИИ — Xray как одно «Прокси-подключение» KeenOS
-Полный план и RCI-контракт: **`docs/XRAY-PROXY-PLAN.md`** (читать первым).
-Юзер на Xray-подписке; после фиксов beta.6/7 Xray стартует, но **туннель не виден
-как интерфейс в роутере** (TPROXY невидим). Требование юзера: от одной подписки —
-ОДНО подключение в KeenOS (раздел **Прокси-подключения**, HTTP/HTTPS/**SOCKS5**),
-параметры которого меняются под капотом при смене сервера. Это штатная фича KeeneticOS
-(компонент **Proxy client**, с 3.9). Модель: keen-manager держит локальный Xray с
-SOCKS-инбаундом `127.0.0.1:10808` (уже есть) и регистрирует ОДИН интерфейс `ProxyN`
-(`interface Proxy0: proxy upstream 127.0.0.1 10808; proxy protocol socks5; proxy connect;
-security-level public; up`). Смена сервера = переписать ТОЛЬКО конфиг Xray; `ProxyN` не
-трогаем. Маршруты вешаются на `ProxyN` штатным `dns-proxy route`, как для AWG (in-xray
-split из beta.6/7 в этом режиме не нужен, оставить для TPROXY-фолбэка). **Точные RCI-шейпы
-снять read-back'ом с уже созданного юзером вручную прокси-подключения:**
-`curl -s http://localhost:79/rci/show/rc/interface/Proxy0`. НЕ коммитить угаданные шейпы
-на живой роутер без сверки. TPROXY оставить как фолбэк, если компонент Proxy client
-отсутствует. Детали, слайсы, чек-лист валидации и карта кода — в XRAY-PROXY-PLAN.md.
+### 🔴 ГЛАВНЫЙ ПРИОРИТЕТ СЛЕДУЮЩЕЙ СЕССИИ — валидировать Xray-Proxy на устройстве + добить веб-бандл
+Xray-как-одно-«Прокси-подключение» **реализован в бэкенде (8-я сессия, в main)**;
+осталась проверка на живом роутере и веб-тумблер. Полный дизайн/контракт —
+**`docs/XRAY-PROXY-PLAN.md`** (там же статус «что сделано / что осталось»).
+
+1. **Сверить RCI-шейп.** `internal/keenetic/proxyiface.go::proxyInterfaceBody` —
+   это ЛУЧШАЯ ДОГАДКА из плана §3, изолированная в одной функции. Снять реальную
+   форму с уже созданного юзером вручную прокси-подключения:
+   `curl -s http://localhost:79/rci/show/rc/interface/Proxy0` — и привести
+   `proxyInterfaceBody` (и его тест) ровно к ней. Неверная догадка НЕ ломает
+   роутер: `bringUpXrayProxy` при отказе RCI латчит `proxyClientDown` и падает в
+   TPROXY (с логом-подсказкой), но proxy-режим не заработает, пока шейп не сойдётся.
+2. **On-device чек-лист** (XRAY-PROXY-PLAN §5): активация Xray → один `ProxyN`
+   в «Прочие подключения → Прокси» (upstream `127.0.0.1:10808`, socks5,
+   connected); смена сервера → тот же `ProxyN`, меняется только внешний IP;
+   маршрут на Xray-подключение → `dns-proxy route → ProxyN`, туннелит только
+   выбранное; удаление последнего Xray-подключения → `ProxyN` снят.
+3. **Веб-тумблер «Интеграция Xray»** (auto/proxy/tproxy) — код НАПИСАН
+   (SettingsPage.tsx + types.ts + i18n/pages/settings.ts + mocks.ts), но
+   **бандл не пересобран**: npm-реестр в песочнице был закрыт (403),
+   RequestNetworkAccess завис в ожидании. Нужно: одобрить `registry.npmjs.org`
+   → `npm ci` → `npm run build` → закоммитить `internal/webui/dist` В ТОМ ЖЕ
+   коммите (иначе CI-гард «Verify committed bundle» упадёт). Правки web/src на
+   этот момент лежат в рабочем дереве незакоммиченными. Бэкенд работает и без
+   тумблера (auto-детект + `PUT /api/settings {xray_integration}`).
+
+### 8-я сессия — Xray как одно «Прокси-подключение» KeenOS (бэкенд, в main)
+Модель: keen-manager держит локальный Xray с SOCKS-инбаундом `127.0.0.1:10808` и
+регистрирует ОДИН управляемый интерфейс `ProxyN` → этот SOCKS. Смена сервера/
+«выбрать лучший» переписывает ТОЛЬКО конфиг Xray; `ProxyN` не трогаем — одно
+стабильное подключение, видимое в UI. Маршруты вешаются на `ProxyN` штатным
+`dns-proxy route`, как на AWG. TPROXY остаётся фолбэком. Слайсы (все в main):
+- **`feat(xray)` 1818687** — `Options.ProxyConnMode`: минимальный SOCKS-only
+  конфиг (socks-inbound + один pinned-сервер + direct/block; без tproxy-inbound,
+  без api/observatory, без in-xray split). Юнит-тест.
+- **`feat(keenetic)` e6e75d0** — `proxyiface.go`: RCI-хелперы Proxy-интерфейса
+  (`FindFreeProxyIndex`/`CreateProxyInterface`/`ProxyConnect`/`SetProxyUpstream`),
+  `Capabilities.HasProxyClient`, `InterfaceInfo.IsProxy`. Шейп в
+  `proxyInterfaceBody` — догадка из плана §3, изолирована и юнит-тестируется;
+  отказ RCI = ошибка → фолбэк в TPROXY. **СВЕРИТЬ НА УСТРОЙСТВЕ.**
+- **`feat(engine)` 59f6a7f** — `proxyconn.go`: `xrayMode()` (auto|proxy|tproxy +
+  латч `proxyClientDown`), `ensureManagedProxyIface()` (создать ОДИН `ProxyN`,
+  переиспользовать между серверами), teardown при удалении последнего Xray,
+  `bringUpXrayProxy()`. `apply.go`/`routes.go`/`connections.go`/`interfaces.go`:
+  `buildActiveXray` ветвится по режиму; Xray-маршруты в proxy-режиме идут на
+  `ProxyN` через dns-proxy (как AWG), in-xray split — только для TPROXY;
+  `integrationOf` → `keenetic-proxy` (visible/routable); Proxy-интерфейсы
+  routable. `model.Settings.XrayIntegration` + `State.ManagedProxyIface`.
+Сборка зелёная: `go build/vet/test` + кросс mipsle/arm64. Релиз beta.8.
 
 **7-я сессия закрыла жалобу юзера из скриншота/лога** (Xray-активация падала,
 «нет единого интерфейса», «маршруты только awg»). Релиз `v0.1.0-beta.6` выпущен; фикс

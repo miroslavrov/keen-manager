@@ -6,8 +6,41 @@
 > только конфиг Xray под капотом; интерфейс в роутере не трогается. Маршруты вешаются
 > на `ProxyN` штатным `dns-proxy route`, как для AWG.
 
-Status: **researched, not yet implemented.** This is the top priority for the next
-session. Written session 7 (2026-07-09).
+Status: **implemented in the backend (session 8), pending on-device validation.**
+Written session 7 (2026-07-09); implemented session 8. The engine now defaults to
+this proxy-connection model on capable firmware; TPROXY remains the fallback.
+
+Session 8 — what landed (all in main):
+- `internal/xray/config.go` — `Options.ProxyConnMode`: a minimal SOCKS-only
+  profile (socks inbound + one pinned server + direct/block; no tproxy inbound,
+  no api/observatory, no in-Xray split). Unit-tested.
+- `internal/keenetic/proxyiface.go` — Proxy-interface RCI helpers
+  (FindFreeProxyIndex / CreateProxyInterface / ProxyConnect / SetProxyUpstream)
+  + `Capabilities.HasProxyClient` + `InterfaceInfo.IsProxy`. Unit-tested.
+- `internal/engine/proxyconn.go` — `xrayMode()` (auto|proxy|tproxy resolution +
+  a proxyClientDown fallback latch), `ensureManagedProxyIface()` (create ONE
+  ProxyN → 127.0.0.1:10808, reused across server switches), teardown on last
+  Xray delete, and `bringUpXrayProxy()` (apply SOCKS config → ensure ProxyN →
+  fall back to TPROXY on RCI rejection).
+- `apply.go` / `routes.go` / `connections.go` / `interfaces.go` — buildActiveXray
+  branches on mode; Xray routes bind to ProxyN via dns-proxy (like AWG) in proxy
+  mode and stay in-Xray split for TPROXY; integration view reports
+  `keenetic-proxy` (visible, routable); Proxy interfaces are routable targets.
+- `model.Settings.XrayIntegration` + `State.ManagedProxyIface`; Settings API
+  accepts/returns `xray_integration` (auto|proxy|tproxy).
+
+⚠️ STILL TO DO before trusting on the live router:
+1. **Verify the RCI shape** in `proxyiface.go::proxyInterfaceBody` against a
+   read-back of the user's hand-made Proxy connection (§3). It is the plan's
+   best guess, isolated so it is a one-function fix. A wrong guess degrades to
+   TPROXY (logged), it does not brick anything — but the proxy path won't work
+   until the shape matches.
+2. **Web Settings toggle**: code is written (SettingsPage + types + i18n +
+   mocks) but the embedded bundle could not be rebuilt this session (npm
+   registry blocked in the sandbox — RequestNetworkAccess pending). Rebuild
+   `internal/webui/dist` and commit it in the same commit before this ships in
+   the UI (CI guard). Backend works without it (auto-detect + API).
+3. Run the on-device validation checklist in §5.
 
 ---
 
