@@ -27,7 +27,8 @@ export interface Conn {
 /** How a connection surfaces on the router (answer to "why don't I see it in
  * the Keenetic UI?"). Mirrors engine.IntegrationView. */
 export interface Integration {
-  /** "native-interface" | "userspace-awg" | "transparent-proxy". */
+  /** "native-interface" | "userspace-awg" | "keenetic-proxy" |
+   * "transparent-proxy". */
   mode: string
   visible_in_router: boolean
   /** Native NDMS interface name once up (e.g. "Wireguard1"); empty otherwise. */
@@ -219,8 +220,11 @@ export interface RouterInterface {
   security?: string
   /** Native WireGuard/AmneziaWG interface. */
   is_wireguard: boolean
-  /** Can back a Routes dns-proxy route (a WireGuard interface that isn't the
-   * router's own bundled VPN server). */
+  /** KeeneticOS "Proxy" interface (Proxy client component) — including the one
+   * keen-manager registers for the Xray exit point. */
+  is_proxy: boolean
+  /** Can back a Routes dns-proxy route (a WireGuard or Proxy interface that
+   * isn't the router's own bundled VPN server). */
   routable: boolean
   /** keen-manager connection that created this interface, when applicable. */
   managed_conn_id?: string
@@ -283,6 +287,10 @@ export interface Settings {
   rollback_timeout_s: number
   kill_switch_default: boolean
   auto_select_interval_min: number
+  /** How an active Xray connection is wired to the router:
+   * "auto" (default) | "proxy" (one visible KeeneticOS Proxy connection) |
+   * "tproxy" (legacy transparent-proxy capture). */
+  xray_integration: string
   platform: Platform
 }
 

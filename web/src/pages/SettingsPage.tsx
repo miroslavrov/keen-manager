@@ -44,6 +44,7 @@ interface SettingsForm {
   rollback_timeout_s: number
   kill_switch_default: boolean
   auto_select_interval_min: number
+  xray_integration: string
 }
 
 type SettingsPayload = Partial<Settings> & {
@@ -82,6 +83,7 @@ export function SettingsPage() {
         rollback_timeout_s: settings.rollback_timeout_s,
         kill_switch_default: settings.kill_switch_default,
         auto_select_interval_min: 15,
+        xray_integration: settings.xray_integration || 'auto',
       })
     }
   }, [settings, form])
@@ -105,6 +107,7 @@ export function SettingsPage() {
         rollback_timeout_s: form.rollback_timeout_s,
         kill_switch_default: form.kill_switch_default,
         auto_select_interval_min: form.auto_select_interval_min,
+        xray_integration: form.xray_integration,
       }
       if (password.trim()) body.password = password
       return api.saveSettings(body as Partial<Settings>)
@@ -259,6 +262,36 @@ export function SettingsPage() {
                 checked={form.kill_switch_default}
                 onCheckedChange={(v) => update('kill_switch_default', v)}
               />
+
+              <Separator />
+
+              <div className="space-y-2">
+                <Label htmlFor="xray-integration">
+                  {t('settings.xrayIntegration')}
+                </Label>
+                <Select
+                  value={form.xray_integration}
+                  onValueChange={(v) => update('xray_integration', v)}
+                >
+                  <SelectTrigger id="xray-integration" className="max-w-[280px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">
+                      {t('settings.xrayIntegrationAuto')}
+                    </SelectItem>
+                    <SelectItem value="proxy">
+                      {t('settings.xrayIntegrationProxy')}
+                    </SelectItem>
+                    <SelectItem value="tproxy">
+                      {t('settings.xrayIntegrationTproxy')}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {t('settings.xrayIntegrationHint')}
+                </p>
+              </div>
             </CardContent>
           </Card>
 
