@@ -48,6 +48,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/routes", s.requireAuth(s.handleRoutes))
 	mux.HandleFunc("POST /api/routes", s.requireAuth(s.handleCreateRoute))
 	mux.HandleFunc("GET /api/routes/presets", s.requireAuth(s.handleRoutePresets))
+	mux.HandleFunc("GET /api/routes/{id}", s.requireAuth(s.handleRouteDetail))
+	mux.HandleFunc("PUT /api/routes/{id}", s.requireAuth(s.handleUpdateRoute))
 	mux.HandleFunc("PUT /api/routes/{id}/toggle", s.requireAuth(s.handleToggleRoute))
 	mux.HandleFunc("DELETE /api/routes/{id}", s.requireAuth(s.handleDeleteRoute))
 
@@ -264,6 +266,35 @@ func (s *Server) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := s.eng.CreateRoute(body.Name, body.PresetID, body.Domains, body.Subnets, body.TargetConnID, body.TargetIface)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) handleRouteDetail(w http.ResponseWriter, r *http.Request) {
+	v, ok := s.eng.RouteDetail(r.PathValue("id"))
+	if !ok {
+		writeErr(w, http.StatusNotFound, "route not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) handleUpdateRoute(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name         string   `json:"name"`
+		Domains      []string `json:"domains"`
+		Subnets      []string `json:"subnets"`
+		TargetConnID string   `json:"target_conn_id"`
+		TargetIface  string   `json:"target_iface"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	v, err := s.eng.UpdateRoute(r.PathValue("id"), body.Name, body.Domains, body.Subnets, body.TargetConnID, body.TargetIface)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return

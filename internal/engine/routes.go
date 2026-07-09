@@ -240,6 +240,86 @@ func (e *Engine) SetRouteEnabled(id string, on bool) error {
 	return err
 }
 
+// RouteDetail returns a route's full view plus its complete domain/subnet
+// membership, so the UI can open a rule for editing (the list view carries only
+// counts to stay light). The bool is false when no route has that id.
+func (e *Engine) RouteDetail(id string) (RouteDetailView, bool) {
+	st := e.store.Get()
+	r, ok := findRoute(st, id)
+	if !ok {
+		return RouteDetailView{}, false
+	}
+	return RouteDetailView{
+		RouteView: e.routeView(st, r),
+		Domains:   append([]string(nil), r.Domains...),
+		Subnets:   append([]string(nil), r.Subnets...),
+	}, true
+}
+
+// UpdateRoute edits an existing route's name, domain/subnet membership and/or
+// target, then re-applies it on the router. The currently-applied form is torn
+// down FIRST (using the pre-edit snapshot) so a shrunk domain set or a changed
+// target never strands stale object-groups / dns-proxy routes behind. Empty
+// name/target fields fall back to the route's current values; an explicitly
+// empty domain+subnet set is rejected (a route must route something).
+func (e *Engine) UpdateRoute(id, name string, domains, subnets []string, targetConnID, targetIface string) (RouteView, error) {
+	st := e.store.Get()
+	old, ok := findRoute(st, id)
+	if !ok {
+		return RouteView{}, fmt.Errorf("route %s not found", id)
+	}
+
+	targetConnID = strings.TrimSpace(targetConnID)
+	targetIface = strings.TrimSpace(targetIface)
+	// A partial edit (e.g. just the domains) keeps the existing target.
+	if targetConnID == "" && targetIface == "" {
+		targetConnID, targetIface = old.TargetConnID, old.TargetIface
+	}
+	if targetConnID != "" {
+		if _, ok := findConn(st, targetConnID); !ok {
+			return RouteView{}, fmt.Errorf("target connection %s not found", targetConnID)
+		}
+	}
+	newName := firstNonEmpty(strings.TrimSpace(name), old.Name)
+	newDomains := dedupeLower(domains)
+	newSubnets := dedupe(subnets)
+	if len(newDomains) == 0 && len(newSubnets) == 0 {
+		return RouteView{}, fmt.Errorf("route %q needs at least one domain or subnet", newName)
+	}
+
+	// Tear the currently-live form down first, against the pre-edit snapshot, so
+	// the exact object-groups/dns-routes that were pushed are the ones removed.
+	_ = e.unapplyRoute(old)
+
+	if err := e.store.Mutate(func(s *model.State) error {
+		for i := range s.Routes {
+			if s.Routes[i].ID != id {
+				continue
+			}
+			s.Routes[i].Name = newName
+			s.Routes[i].Domains = newDomains
+			s.Routes[i].Subnets = newSubnets
+			s.Routes[i].TargetConnID = targetConnID
+			s.Routes[i].TargetIface = targetIface
+			s.Routes[i].Groups = nil
+			s.Routes[i].Applied = false
+		}
+		return nil
+	}); err != nil {
+		return RouteView{}, err
+	}
+	e.Logf("route updated: %s (%d domains, %d subnets)", newName, len(newDomains), len(newSubnets))
+
+	// Best-effort re-apply; a failure surfaces in the view Note, not fatal.
+	if err := e.applyRoute(id); err != nil {
+		e.Logf("route %s not yet live: %v", newName, err)
+	}
+	e.publishState()
+	st = e.store.Get()
+	rr, _ := findRoute(st, id)
+	return e.routeView(st, rr), nil
+}
+
 // DeleteRoute removes a route, tearing it down on the router first.
 func (e *Engine) DeleteRoute(id string) error {
 	r, ok := findRoute(e.store.Get(), id)

@@ -204,6 +204,15 @@ type RouteView struct {
 	Note         string `json:"note,omitempty"`
 }
 
+// RouteDetailView is a RouteView plus the route's full domain/subnet
+// membership. Returned by GET /api/routes/{id} so the UI can open a rule for
+// editing; the list endpoint keeps only counts (DomainCount/SubnetCount) light.
+type RouteDetailView struct {
+	RouteView
+	Domains []string `json:"domains"`
+	Subnets []string `json:"subnets"`
+}
+
 // PresetView is one entry in the built-in service catalog.
 type PresetView struct {
 	ID          string `json:"id"`
