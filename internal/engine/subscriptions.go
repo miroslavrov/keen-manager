@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -389,8 +390,19 @@ func (e *Engine) SubscriptionServers(id string) []ServerView {
 	return out
 }
 
-// SelectBest pings all servers in a subscription and activates the fastest one
-// that responds.
+// maxSelectCandidates bounds how many latency-ranked servers select-best will
+// try to bring up before giving up, so a subscription full of pingable-but-
+// DPI-blocked servers can't turn one click into dozens of activation attempts.
+const maxSelectCandidates = 5
+
+// SelectBest ranks a subscription's servers by TCP latency and activates the
+// fastest one whose tunnel actually carries traffic end-to-end. TCP reachability
+// alone isn't enough — a server can answer on :443 while DPI tears down its
+// reality/TLS session — so candidates are tried best-first and each is verified
+// through the tunnel by Activate's verify-then-rollback deadman; the first that
+// passes wins. This makes "select best" resilient to a fast-pinging dead server
+// instead of failing the whole action on it, and rolls back to the previously
+// active connection if every candidate fails.
 func (e *Engine) SelectBest(id string) (string, error) {
 	st := e.store.Get()
 	sub, ok := findSub(st, id)
@@ -416,26 +428,107 @@ func (e *Engine) SelectBest(id string) (string, error) {
 		return best, nil
 	}
 
-	best := e.fastest(members)
-	if best == "" {
+	ranked := e.rankReachable(members)
+	if len(ranked) == 0 {
 		return "", fmt.Errorf("no reachable server in subscription %q", sub.Name)
 	}
-	e.Logf("select-best for %s -> %s", sub.Name, best)
-	if err := e.Activate(best); err != nil {
-		return "", err
+
+	// Provision xray-core once up front (bounded) so each candidate bring-up is
+	// just a config swap + restart and the per-candidate verify budget isn't
+	// eaten by a one-time xray-core download. Best-effort: bringUp re-checks.
+	ictx, icancel := context.WithTimeout(e.baseCtx(), 4*time.Minute)
+	_ = e.xray.Ensure(ictx)
+	icancel()
+
+	limit := len(ranked)
+	if limit > maxSelectCandidates {
+		limit = maxSelectCandidates
 	}
-	return best, nil
+	var lastErr error
+	for tried, cid := range ranked[:limit] {
+		c, ok := findConn(e.store.Get(), cid)
+		if !ok {
+			continue
+		}
+		e.Logf("select-best for %s: trying %s (%d/%d candidates)", sub.Name, c.Name, tried+1, limit)
+		ctx, cancel := e.selectActivateCtx()
+		err := e.activate(ctx, cid)
+		cancel()
+		if err == nil {
+			e.Logf("select-best for %s -> %s", sub.Name, c.Name)
+			return cid, nil
+		}
+		lastErr = err
+		e.Logf("select-best: %s did not verify: %v", c.Name, err)
+	}
+	if lastErr != nil {
+		return "", fmt.Errorf("no server in subscription %q carried traffic (tried %d of %d reachable); last error: %w", sub.Name, limit, len(ranked), lastErr)
+	}
+	return "", fmt.Errorf("no reachable server in subscription %q", sub.Name)
 }
 
-// fastest concurrently TCP-pings the given connections and returns the id of the
-// lowest-latency reachable one ("" if none respond).
-func (e *Engine) fastest(members []model.Connection) string {
-	type res struct {
-		id  string
-		ms  int
-		ok  bool
+// selectVerifyCapS caps the per-candidate verify budget during select-best so
+// trying several servers stays responsive for an interactive click; a working
+// tunnel verifies on its first probe well within it.
+const selectVerifyCapS = 25
+
+// selectBringUpMarginS is headroom over the verify budget for the candidate
+// bring-up itself (config swap + xray restart; xray-core is pre-ensured).
+const selectBringUpMarginS = 15
+
+// selectActivateCtx returns a bounded context for one select-best candidate
+// activation. activate observes the context in bringUpCtx and verifyActive, so
+// a dead candidate is abandoned at the cap instead of burning the full
+// (interactive) rollback timeout per server.
+func (e *Engine) selectActivateCtx() (context.Context, context.CancelFunc) {
+	budget := e.rollbackTimeout()
+	if budget > selectVerifyCapS {
+		budget = selectVerifyCapS
 	}
-	results := make([]res, len(members))
+	return context.WithTimeout(e.baseCtx(), time.Duration(budget+selectBringUpMarginS)*time.Second)
+}
+
+// fastest returns the id of the lowest-latency reachable connection ("" if none
+// respond). Retained for the background subscription probe.
+func (e *Engine) fastest(members []model.Connection) string {
+	if ranked := e.rankReachable(members); len(ranked) > 0 {
+		return ranked[0]
+	}
+	return ""
+}
+
+// connLatency is one server's TCP-ping outcome, ranked by rankByLatency.
+type connLatency struct {
+	id string
+	ms int
+	ok bool
+}
+
+// rankByLatency returns the ids of the reachable (ok) results ordered
+// fastest-first. Pure and order-stable (ties keep input order), so the ranking
+// is unit-tested without real network probes.
+func rankByLatency(in []connLatency) []string {
+	ranked := make([]connLatency, 0, len(in))
+	for _, r := range in {
+		if r.ok {
+			ranked = append(ranked, r)
+		}
+	}
+	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].ms < ranked[j].ms })
+	ids := make([]string, len(ranked))
+	for i, r := range ranked {
+		ids[i] = r.id
+	}
+	return ids
+}
+
+// rankReachable concurrently TCP-pings the given connections, records each
+// result as runtime status, and returns the ids of the reachable ones ordered
+// fastest-first. Off-device endpoints (no host/port) are skipped. Shared by
+// select-best (which tries them best-first through the tunnel) and the
+// background subscription probe.
+func (e *Engine) rankReachable(members []model.Connection) []string {
+	results := make([]connLatency, len(members))
 	var wg sync.WaitGroup
 	for i, c := range members {
 		host, port := endpointHostPort(c)
@@ -448,7 +541,7 @@ func (e *Engine) fastest(members []model.Connection) string {
 			ctx, cancel := context.WithTimeout(e.baseCtx(), 6*time.Second)
 			defer cancel()
 			p := health.TCPPing(ctx, host, port, 6*time.Second)
-			results[i] = res{id: id, ms: p.LatencyMs, ok: p.OK}
+			results[i] = connLatency{id: id, ms: p.LatencyMs, ok: p.OK}
 			rs := model.RuntimeStatus{ConnID: id, LastCheck: time.Now(), LatencyMs: p.LatencyMs}
 			if p.OK {
 				rs.Status = model.StatusUp
@@ -459,16 +552,7 @@ func (e *Engine) fastest(members []model.Connection) string {
 		}(i, c.ID, host, port)
 	}
 	wg.Wait()
-
-	best := ""
-	bestMs := 1 << 30
-	for _, r := range results {
-		if r.ok && r.ms < bestMs {
-			bestMs = r.ms
-			best = r.id
-		}
-	}
-	return best
+	return rankByLatency(results)
 }
 
 // probeSubscription probes all of a subscription's servers (best-effort).
