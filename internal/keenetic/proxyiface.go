@@ -35,15 +35,19 @@ import (
 //	 "proxy":{"upstream":{"host":"127.0.0.1","port":"10808"}},"up":true}
 //
 // That confirmed the upstream/description/up nesting AND pinpointed the P0
-// routing bug: a connected, security-level-public Proxy interface is
-// auto-enrolled by the firmware into internet-access (default-route) selection
-// and handed ip name-servers — so it swallowed the entire LAN's traffic and the
-// router's own DNS into the SOCKS tunnel, which (looping its own upstream back
-// through itself) then carried nothing. proxyInterfaceBody now pins the
-// anti-hijack invariant (ip global off, ip name-servers off, LAN security zone)
-// so the interface is a per-domain routing TARGET only. It is isolated in one
-// function so the shape stays trivial to correct; a rejected write still
-// surfaces as an error → the engine falls back to TPROXY with a logged hint.
+// routing bug: KeeneticOS auto-assigns a connected proxy interface a GLOBAL
+// (internet-access) priority and, for a public internet interface, makes it a
+// DNS source — so it swallowed the entire LAN's traffic and the router's own DNS
+// into the SOCKS tunnel, which (looping its own upstream back through itself)
+// then carried nothing. Session 13 also nailed the write shapes on-device:
+// clearing "ip global" returned "global priority cleared", and the zone must be
+// written in OBJECT form ({"public":true}) — the bare-string form is rejected
+// with "no input". proxyInterfaceBody / HardenProxyInterface now pin the
+// anti-hijack invariant (ip global off, name-servers off for v4+v6) while
+// KEEPING the interface "public" (the correct zone for an internet-egress proxy;
+// the bug was the priority, not the zone) so it is a per-domain routing TARGET
+// only. It is isolated in one function so the shape stays trivial to correct; a
+// rejected write still surfaces as an error → the engine falls back to TPROXY.
 
 // ProxyInterfaceName returns the canonical RCI interface name for index n, e.g.
 // ProxyInterfaceName(0) == "Proxy0".
@@ -110,12 +114,12 @@ type ProxyConfig struct {
 	// (TCP-only); DNS/UDP through the proxy may additionally need DoT/DoH or a
 	// udpgw upstream — see docs/XRAY-PROXY-PLAN.md §2.
 	UDP bool
-	// SecurityLevel is the interface security zone. keen-manager uses a LAN zone
-	// ("private"), NOT "public": the managed proxy is a per-domain routing TARGET
-	// reached from the LAN, not a WAN uplink. A "public" proxy interface is
-	// auto-enrolled by KeeneticOS into internet-access (default-route) selection,
-	// which hijacks the whole router into the SOCKS tunnel — see
-	// engine/proxyconn.go and docs/XRAY-PROXY-PLAN.md §6.
+	// SecurityLevel is the interface security zone, written in object form
+	// ({"<level>":true}). keen-manager uses "public" — the correct zone for a
+	// proxy that egresses to the internet. The managed proxy is kept out of the
+	// router's default route not by its zone but by clearing its global
+	// (internet-access) priority + DNS sourcing; see engine/proxyconn.go and
+	// docs/XRAY-PROXY-PLAN.md §6.
 	SecurityLevel string
 	Description   string
 	// Up brings the interface up and starts it connecting on creation.
@@ -150,19 +154,25 @@ func proxyInterfaceBody(cfg ProxyConfig) map[string]any {
 		"up":    cfg.Up,
 		// Anti-hijack invariant (see engine/proxyconn.go + docs/XRAY-PROXY-PLAN.md
 		// §6). The managed Proxy is a per-domain ROUTE TARGET, never the router's
-		// internet uplink. Two KeeneticOS behaviours would otherwise turn a
-		// connected proxy interface into a default route for the whole LAN AND the
-		// router itself:
-		//   • ip global       — enrols the interface in internet-access priority
-		//                        (default-route selection). A SOCKS proxy has no
-		//                        server-endpoint pinning, so as a default it loops
-		//                        the router's own DNS + Xray's server-upstream back
-		//                        through itself. Force it OFF.
+		// internet uplink. KeeneticOS auto-assigns a connected proxy interface a
+		// GLOBAL (internet-access) priority and, for a public internet interface,
+		// makes it a DNS source — which turned it into a default route for the
+		// whole LAN AND the router itself. Both must be forced off:
+		//   • ip global       — the internet-access (default-route) priority.
+		//                        A SOCKS proxy has no server-endpoint pinning, so as
+		//                        a default it loops the router's own DNS + Xray's
+		//                        server-upstream back through itself. Clear it. (On
+		//                        the user's device this returned "global priority
+		//                        cleared" — session 13.)
 		//   • ip name-servers  — routes the router's DNS resolution through the
 		//                        interface; over a TCP-only SOCKS that has stalled
-		//                        that hangs every lookup system-wide. Force it OFF.
+		//                        that hangs every lookup system-wide. Force it OFF
+		//                        for BOTH v4 (ip) and v6 (ipv6).
 		"ip": map[string]any{
 			"global":       false,
+			"name-servers": false,
+		},
+		"ipv6": map[string]any{
 			"name-servers": false,
 		},
 	}
@@ -170,21 +180,25 @@ func proxyInterfaceBody(cfg ProxyConfig) map[string]any {
 		body["description"] = cfg.Description
 	}
 	if cfg.SecurityLevel != "" {
-		body["security-level"] = cfg.SecurityLevel
+		// The zone is a nested key ({"public":true}), NOT a bare string: the string
+		// form is rejected by RCI with "no input" (confirmed on-device, session 13),
+		// and the read-back reports the object form.
+		body["security-level"] = map[string]any{cfg.SecurityLevel: true}
 	}
 	return body
 }
 
 // HardenProxyInterface re-applies the anti-hijack invariant to an EXISTING
-// managed Proxy interface: force ip global off, ip name-servers off, and (when
-// given) move it to a non-WAN security zone. keen-manager creates the interface
-// only once and reuses it across server switches, so installs made by an earlier
-// build still carry the hijacking shape (security-level public + the firmware's
-// default ip name-servers). This heals them in place on the next daemon start
-// WITHOUT recreating the interface — recreation would churn the dns-proxy routes
-// bound to it. Best-effort and fully reversible; a rejected write is returned so
-// the caller can log and carry on.
-func HardenProxyInterface(ctx context.Context, c *Client, name, securityLevel string) error {
+// managed Proxy interface: clear its GLOBAL (internet-access / default-route)
+// priority and stop it sourcing the router's DNS (v4 + v6). keen-manager creates
+// the interface once and reuses it across server switches, so an interface left
+// with the firmware's auto-assigned global priority hijacks the whole router's
+// egress into the SOCKS tunnel. This heals it in place WITHOUT recreating the
+// interface (recreation would churn the dns-proxy routes bound to it) and WITHOUT
+// touching its security zone (a proxy is legitimately "public"; the bug was the
+// priority, not the zone). Best-effort and fully reversible; a rejected write is
+// returned so the caller can log and carry on.
+func HardenProxyInterface(ctx context.Context, c *Client, name string) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("keenetic: harden proxy interface: empty name")
 	}
@@ -193,9 +207,9 @@ func HardenProxyInterface(ctx context.Context, c *Client, name, securityLevel st
 			"global":       false,
 			"name-servers": false,
 		},
-	}
-	if lvl := strings.TrimSpace(securityLevel); lvl != "" {
-		body["security-level"] = lvl
+		"ipv6": map[string]any{
+			"name-servers": false,
+		},
 	}
 	_, err := c.Post(ctx, map[string]any{
 		"interface": map[string]any{name: body},

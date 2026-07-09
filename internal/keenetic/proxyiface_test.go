@@ -70,7 +70,7 @@ func TestCreateProxyInterfaceBody(t *testing.T) {
 		Upstream:      "127.0.0.1",
 		Port:          10808,
 		Protocol:      "socks5",
-		SecurityLevel: "private",
+		SecurityLevel: "public",
 		Description:   "keen-manager",
 		Up:            true,
 	})
@@ -92,19 +92,24 @@ func TestCreateProxyInterfaceBody(t *testing.T) {
 	if got := dig(t, body, "interface", "Proxy0", "proxy", "connect"); got != true {
 		t.Errorf("connect = %v, want true", got)
 	}
-	if got := dig(t, body, "interface", "Proxy0", "security-level"); got != "private" {
-		t.Errorf("security-level = %v, want private (a LAN route target, not a WAN uplink)", got)
+	// security-level is written in OBJECT form ({"public":true}); the bare-string
+	// form is rejected by RCI with "no input" (confirmed on-device, session 13).
+	if got := dig(t, body, "interface", "Proxy0", "security-level", "public"); got != true {
+		t.Errorf("security-level.public = %v, want true (object form, not a bare string)", got)
 	}
 	if got := dig(t, body, "interface", "Proxy0", "up"); got != true {
 		t.Errorf("up = %v, want true", got)
 	}
 	// Anti-hijack invariant: never a default-route/internet-access uplink and
-	// never a DNS source for the router.
+	// never a DNS source for the router (v4 AND v6).
 	if got := dig(t, body, "interface", "Proxy0", "ip", "global"); got != false {
 		t.Errorf("ip.global = %v, want false (must not join internet-access/default-route selection)", got)
 	}
 	if got := dig(t, body, "interface", "Proxy0", "ip", "name-servers"); got != false {
-		t.Errorf("ip.name-servers = %v, want false (must not route the router's DNS through the proxy)", got)
+		t.Errorf("ip.name-servers = %v, want false (must not route the router's v4 DNS through the proxy)", got)
+	}
+	if got := dig(t, body, "interface", "Proxy0", "ipv6", "name-servers"); got != false {
+		t.Errorf("ipv6.name-servers = %v, want false (must not route the router's v6 DNS through the proxy)", got)
 	}
 	// TCP-only by default: no socks5-udp key.
 	proxy := dig(t, body, "interface", "Proxy0", "proxy").(map[string]any)
@@ -114,16 +119,18 @@ func TestCreateProxyInterfaceBody(t *testing.T) {
 }
 
 // TestHardenProxyInterface asserts the heal-in-place payload used to fix an
-// interface an earlier build created with the hijacking shape. It must force
-// ip global off + ip name-servers off and move the interface to the given LAN
-// zone — without recreating it (so the dns-proxy routes bound to it survive).
+// interface an earlier build left with the firmware's auto-assigned global
+// (internet-access) priority. It must clear ip global + name-servers (v4 AND v6)
+// WITHOUT touching the security zone (a proxy is legitimately public) and WITHOUT
+// rewriting the proxy block (so the working connection + the dns-proxy routes
+// bound to it survive).
 func TestHardenProxyInterface(t *testing.T) {
 	c, cs := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":[{"status":"message","message":"ok"}]}`))
 	})
 
-	if err := HardenProxyInterface(context.Background(), c, "Proxy0", "private"); err != nil {
+	if err := HardenProxyInterface(context.Background(), c, "Proxy0"); err != nil {
 		t.Fatal(err)
 	}
 	body := cs.lastBodyJSON(t)
@@ -133,22 +140,17 @@ func TestHardenProxyInterface(t *testing.T) {
 	if got := dig(t, body, "interface", "Proxy0", "ip", "name-servers"); got != false {
 		t.Errorf("ip.name-servers = %v, want false", got)
 	}
-	if got := dig(t, body, "interface", "Proxy0", "security-level"); got != "private" {
-		t.Errorf("security-level = %v, want private", got)
+	if got := dig(t, body, "interface", "Proxy0", "ipv6", "name-servers"); got != false {
+		t.Errorf("ipv6.name-servers = %v, want false", got)
 	}
-	// Hardening must NOT rewrite the proxy upstream/protocol (leave the working
-	// connection intact); it only touches ip.* + security-level.
-	if _, present := dig(t, body, "interface", "Proxy0").(map[string]any)["proxy"]; present {
+	iface := dig(t, body, "interface", "Proxy0").(map[string]any)
+	// Hardening must NOT touch the security zone (leave it public) …
+	if _, present := iface["security-level"]; present {
+		t.Error("harden must not rewrite security-level (the zone is fine; only the priority was the bug)")
+	}
+	// … and must NOT rewrite the proxy upstream/protocol (leave the connection intact).
+	if _, present := iface["proxy"]; present {
 		t.Error("harden must not include a proxy block (it must not churn the upstream)")
-	}
-
-	// Empty security level → omit the key (only ip.* is asserted).
-	if err := HardenProxyInterface(context.Background(), c, "Proxy0", ""); err != nil {
-		t.Fatal(err)
-	}
-	body = cs.lastBodyJSON(t)
-	if _, present := dig(t, body, "interface", "Proxy0").(map[string]any)["security-level"]; present {
-		t.Error("security-level must be omitted when the level argument is empty")
 	}
 }
 

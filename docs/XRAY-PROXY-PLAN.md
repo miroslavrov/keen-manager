@@ -6,11 +6,14 @@
 > только конфиг Xray под капотом; интерфейс в роутере не трогается. Маршруты вешаются
 > на `ProxyN` штатным `dns-proxy route`, как для AWG.
 
-Status: **implemented in the backend (session 8); session 9 removed `ip global`;
-session 13 confirmed the on-device root cause (a `security-level public` proxy
-interface is auto-enrolled into internet-access + DNS) and landed the full fix
-(LAN zone + `ip global`/`name-servers` off + heal-in-place reconcile). Pending
-on-device confirmation that a hardened ProxyN still forwards routed domains.**
+Status: **implemented in the backend (session 8); session 9 stopped SETTING `ip
+global`; session 13 confirmed on-device that the firmware AUTO-assigns a
+connected proxy a global (internet-access) priority — clearing it returned
+"Proxy0: global priority cleared" — and landed the fix (explicitly clear `ip
+global` + `name-servers` v4/v6, keep the `public` zone, object-form writes,
+heal-in-place reconcile). Pending the decisive on-device test with the tunnel UP
+(does the hijack stay gone once ProxyN reconnects, and does the tunnel carry
+traffic).**
 Written session 7 (2026-07-09); implemented session 8. The engine now defaults to
 this proxy-connection model on capable firmware; TPROXY remains the fallback.
 
@@ -274,28 +277,32 @@ reconciled/torn down after a restart. Persisted like `NativeIfaces`.
   global` in session 9 was necessary but NOT sufficient. The session-13 read-back
   (`show/rc/interface/Proxy0`) showed the managed interface as
   `security-level {public:true}` + `ip name-servers:true` + `up`, with NO `ip
-  global` — yet the whole LAN + the router itself were still being swallowed into
-  the tunnel. On KeeneticOS 5.1.0 a **connected `security-level public` Proxy
-  interface is auto-enrolled into internet-access (default-route) selection**
-  regardless of the `ip global` flag (which is why the user's "use for internet
-  access" checkbox appeared stuck — the interface was already in the group), and
-  a public internet iface also gets **`ip name-servers`**, routing the router's
-  DNS through the dead TCP-only SOCKS. Together that (a) blackholed all LAN
-  traffic, (b) hung all DNS system-wide, and (c) looped Xray's OWN upstream to
-  the vless server back through ProxyN, so the tunnel could never come up
-  (`curl -x socks5h://127.0.0.1:10808` hung). **Fix (session 13, in `main`):**
-  `proxyInterfaceBody` now pins `ip global:false` + `ip name-servers:false` and
-  creates the interface in a **LAN zone (`security-level private`)** — a
-  per-domain routing TARGET, not a WAN uplink; `keenetic.HardenProxyInterface`
-  re-asserts that shape on an already-created interface (heals earlier installs
-  without recreating it / churning its routes), driven by
-  `engine.reconcileProxyIface()` on boot and by `ensureManagedProxyIface` on
-  activate. **Still to confirm on-device (the user runs it):** that after
-  hardening a `dns-proxy route → ProxyN` still forwards the selected domains (a
-  private-zone route target should, since Xray does the real WAN egress). If a
-  private zone turns out NOT to forward, the fallback is `public` + explicit
-  removal from internet-access priority; capture which lever works and, as
-  belt-and-suspenders, pin a host-route to the active server IP via the WAN.
+  global` field — yet the whole LAN + the router itself were still being
+  swallowed into the tunnel. The key discovery: **KeeneticOS AUTO-assigns a
+  connected proxy interface a global (internet-access / default-route)
+  priority** — an RCI `ip global false` returned `"Proxy0": global priority
+  cleared`, proving it had one that session 9's "don't set it" never removed
+  (which is also why the user's "use for internet access" checkbox looked stuck —
+  it was already in the group). A public internet iface additionally gets `ip
+  name-servers`, routing the router's DNS through the dead TCP-only SOCKS.
+  Together that (a) blackholed all LAN traffic, (b) hung all DNS system-wide, and
+  (c) looped Xray's OWN upstream to the vless server back through ProxyN, so the
+  tunnel could never come up. **Fix (session 13, in `main`):** the zone is NOT
+  the problem — `public` is correct for an internet-egress proxy. The fix
+  explicitly clears the auto-assigned priority: `proxyInterfaceBody` /
+  `keenetic.HardenProxyInterface` pin `ip global:false` + `ip name-servers:false`
+  (v4) + `ipv6.name-servers:false`, keep `public`, and write the zone in the
+  required OBJECT form (`{"security-level":{"public":true}}` — the bare-string
+  form is rejected `"no input"`). Harden runs on boot (`reconcileProxyIface`) and
+  on activate (`ensureManagedProxyIface`), healing earlier installs in place
+  (never recreating the interface / churning its routes). **Decisive on-device
+  test still pending (tunnel UP):** the session-13 run did not reproduce the bug
+  because Xray was down (nothing on :10808). Confirm with the tunnel active that
+  (1) the hijack stays gone once ProxyN reconnects (i.e. the firmware does not
+  RE-assign global priority on connect — if it does, escalate to a low/manual
+  priority or `private` zone), and (2) the tunnel actually carries traffic
+  (`curl -x socks5h://127.0.0.1:10808` → server IP). Belt-and-suspenders if a
+  re-assign race appears: pin a host-route to the active server IP via the WAN.
 
 ## 7. Code map (files to touch)
 - NEW `internal/keenetic/proxyiface.go` (+ `_test.go`) — Proxy interface RCI.

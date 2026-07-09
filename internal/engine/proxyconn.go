@@ -30,13 +30,16 @@ const (
 	proxyIfaceDescription = "keen-manager (Xray)"
 
 	// proxyIfaceSecurityLevel is the security zone the managed Proxy interface is
-	// created in. It is deliberately a LAN zone ("private"), NOT "public": the
-	// interface is a per-domain routing TARGET reached from the LAN, not a WAN
-	// uplink. A "public" proxy interface is auto-enrolled by KeeneticOS into
-	// internet-access (default-route) selection, which hijacks the router's whole
-	// egress + DNS into the SOCKS tunnel (the on-device P0 bug — see
-	// ensureManagedProxyIface and docs/XRAY-PROXY-PLAN.md §6).
-	proxyIfaceSecurityLevel = "private"
+	// created in. "public" is correct for a proxy that egresses to the internet
+	// (via the local Xray), and it is the zone the firmware assigns proxy
+	// connections anyway. The on-device P0 hijack was NOT caused by the zone but
+	// by KeeneticOS auto-assigning the interface a GLOBAL (internet-access)
+	// priority — confirmed session 13, where clearing it returned "Proxy0: global
+	// priority cleared". The fix is to explicitly clear that priority (and stop it
+	// sourcing the router's DNS), not to change the zone. See
+	// ensureManagedProxyIface / hardenManagedProxyIface and
+	// docs/XRAY-PROXY-PLAN.md §6.
+	proxyIfaceSecurityLevel = "public"
 )
 
 // xrayMode resolves how an Xray connection is wired to the router, honouring
@@ -153,8 +156,8 @@ func (e *Engine) ensureManagedProxyIface() (string, error) {
 	// SOCKS is also TCP-only, so UDP DNS through it dies outright. That is the
 	// on-device "it swallows all traffic / no site loads / only local IPs work"
 	// report. CreateProxyInterface already pins ip global=off + name-servers=off
-	// in a LAN zone; hardenManagedProxyIface re-asserts it (idempotent — and it
-	// is the same call that heals pre-existing interfaces above). Traffic reaches
+	// (v4+v6); hardenManagedProxyIface re-asserts it (idempotent — and it is the
+	// same call that heals pre-existing interfaces above). Traffic reaches
 	// the tunnel ONLY through explicit dns-proxy routes bound to ProxyN (the
 	// Routes page), exactly like AWG's per-service routes; the WAN stays the
 	// default so DNS and Xray's own upstream egress normally. See
@@ -180,8 +183,8 @@ func (e *Engine) hardenManagedProxyIface(ctx context.Context, name string) {
 	if e.keenetic == nil || e.runner.DryRun || name == "" {
 		return
 	}
-	if err := keenetic.HardenProxyInterface(ctx, e.keenetic, name, proxyIfaceSecurityLevel); err != nil {
-		e.Logf("proxy-conn: warning: could not harden %s against the internet-access hijack (%v) — if the whole LAN routes into the tunnel, move %s to a LAN zone and remove it from internet-access priority in the Keenetic UI", name, err, name)
+	if err := keenetic.HardenProxyInterface(ctx, e.keenetic, name); err != nil {
+		e.Logf("proxy-conn: warning: could not harden %s against the internet-access hijack (%v) — if the whole LAN routes into the tunnel, clear its global/internet-access priority in the Keenetic UI (Connection priorities)", name, err)
 		return
 	}
 	if err := e.keenetic.Save(ctx); err != nil {

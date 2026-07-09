@@ -36,49 +36,60 @@ DNS роутера идёт через дохлый TCP-only SOCKS. Итог: (a
 (b) весь DNS висит, (c) собственный аплинк Xray к vless-серверу заворачивается
 обратно в ProxyN — петля, туннель не поднимается. Это ровно жалоба юзера.
 
-**Фикс (в `main`, слайс `fix(engine)`):**
-- `keenetic/proxyiface.go::proxyInterfaceBody` теперь пиннит **`ip global:false`
-  + `ip name-servers:false`** и создаёт интерфейс в **LAN-зоне
-  (`security-level private`)** — это цель для per-domain маршрутов, НЕ WAN-аплинк.
-- Новый `keenetic.HardenProxyInterface` перезакрепляет эту форму на УЖЕ созданном
-  интерфейсе (лечит инсталлы прошлых билдов БЕЗ пересоздания — маршруты на нём
-  выживают). Зовётся из `engine.reconcileProxyIface()` на бут и из
-  `ensureManagedProxyIface` на активации (для новых и существующих ProxyN).
-- Юнит-тесты обновлены (`TestCreateProxyInterfaceBody` + новый
-  `TestHardenProxyInterface`). Сборка зелёная: `go build/vet/test` + кросс
-  mipsle/arm64. Веб не трогался (CI-гард бандла не затронут).
+**Уточнение корня по 2-му прогону на устройстве (важно):** зона НЕ виновата.
+`ip global false` на устройстве вернул `"Proxy0": global priority cleared` —
+значит firmware САМ навесил интерфейсу global-приоритет (интернет-доступ), и
+именно его надо ЯВНО снять (9-я лишь перестала его ВЫСТАВЛЯТЬ, но не снимала
+авто-назначенный). `ip name-servers false` → `ignore IPv4 name servers` (ок).
+Запись зоны строкой (`"security-level":"private"`) **отклонена** RCI
+(`no input`) — нужна ОБЪЕКТНАЯ форма `{"security-level":{"public":true}}`.
+IPv6 `name-servers` остаётся отдельным полем (`ipv6.name-servers`) — гасить тоже.
 
-⚠️ **НА ЮЗЕРЕ (снять с устройства, команды — в конце этого блока):** подтвердить,
-что после hardening (1) интернет на ПК возвращается при поднятом туннеле, и
-(2) `dns-proxy route → ProxyN` всё ещё гонит ВЫБРАННЫЕ домены в туннель (private-
-зона как route-target должна работать — реальный WAN-выход делает Xray). Если
-private НЕ форвардит — фолбэк `public` + явное удаление из приоритета интернета;
-снять, какой рычаг сработал. Плюс проверить, поднялся ли сам туннель после снятия
-петли (`curl -x socks5h://127.0.0.1:10808 https://api.ipify.org` должен вернуть IP
-СЕРВЕРА). Если и без петли туннель молчит — это уже DPI по reality/TLS (отдельный
-корень: `xray -test` + логи `xray run`, сменить probe-target).
+**Фикс (в `main`, слайсы `fix(engine)` 460d6a8 + корректировка):**
+- `keenetic/proxyiface.go::proxyInterfaceBody` пиннит **`ip global:false` +
+  `ip name-servers:false` + `ipv6.name-servers:false`**, зона остаётся
+  **`public`** (правильная для интернет-egress прокси; баг был в приоритете, НЕ
+  в зоне), записывается в объектной форме. Интерфейс — цель для per-domain
+  маршрутов, из дефолт-роута исключён снятием global-приоритета.
+- `keenetic.HardenProxyInterface(name)` перезакрепляет это на УЖЕ созданном
+  интерфейсе (чистит global+name-servers v4/v6, зону НЕ трогает; лечит инсталлы
+  прошлых билдов БЕЗ пересоздания — маршруты выживают). Зовётся из
+  `engine.reconcileProxyIface()` на бут и из `ensureManagedProxyIface` на активации.
+- Юнит-тесты обновлены (объектная форма зоны + v6). Сборка зелёная:
+  `go build/vet/test` + кросс mipsle/arm64. Веб не трогался.
 
-#### P0-ЭКСПЕРИМЕНТ 13-й (on-device, туннель ВКЛючён) — подтвердить фикс вживую
+⚠️ **2-й прогон НЕ воспроизвёл баг:** Xray в тот момент был ВЫКЛючен
+(`ps|grep xray` пусто, на `:10808` никто не слушает, `curl -x socks5h` пусто —
+refused, оба обычных curl отдали 301/200). Т.е. интернет работал просто потому,
+что туннель лежал. Global-приоритет и name-servers мы сняли, но под НАГРУЗКОЙ
+(туннель ВКЛ) фикс ещё не проверен, и неясно, почему Xray не поднят.
+
+⚠️ **СЛЕДУЮЩЕЕ НА ЮЗЕРЕ (решающий тест, туннель ВКЛючён):** включить Xray-подписку
+и снять: (1) поднялся ли Xray (`ps|grep xray`, слушает ли `:10808`) и «connected»
+ли `Proxy0`; (2) не вернулся ли global-приоритет `Proxy0` при реконнекте (гипотеза
+про авто-переназначение — если да, придётся уводить в `private`/низкий приоритет);
+(3) не хайджекнут ли интернет (raw-ip + by-name); (4) несёт ли туннель трафик
+(`curl -x socks5h://127.0.0.1:10808` → IP СЕРВЕРА). Если хайджека нет, а туннель
+молчит — отдельный корень DPI reality/TLS (`xray -test` + логи `xray run`,
+сменить probe-target на Failover).
+
+#### P0-ЭКСПЕРИМЕНТ 13-й (on-device) — RCI-формы, ПОДТВЕРЖДЁННЫЕ на устройстве
 ```sh
 B=http://localhost:79/rci
-# 0) снапшот ДО
-curl -s $B/show/rc/interface/Proxy0; echo
-curl -s $B/show/ip/route | grep -iE 'default|0\.0\.0\.0|Proxy'; echo
-ps w | grep -i '[x]ray'; (netstat -ltnp 2>/dev/null||ss -ltnp 2>/dev/null)|grep 10808
-# 1) DNS-хайджек vs роут-хайджек: raw-IP (без DNS) против имени
-curl -s -m 8 -o /dev/null -w 'raw-ip=%{http_code} t=%{time_total}\n' https://1.1.1.1/
-curl -s -m 8 -o /dev/null -w 'by-name=%{http_code} t=%{time_total}\n' https://api.ipify.org/
-# 2) ПРИМЕНИТЬ ФИКС вживую (то же, что делает код): LAN-зона + global/name-servers off
+# ЗОНА — только объектная форма (строка => RCI "no input"):
 curl -s $B/ -H 'Content-Type: application/json' \
-  -d '{"interface":{"Proxy0":{"security-level":"private","ip":{"global":false,"name-servers":false}}}}'; echo
+  -d '{"interface":{"Proxy0":{"security-level":{"public":true}}}}'; echo
+# СНЯТЬ хайджек-векторы (ЭТО и есть фикс; global-приоритет + DNS v4/v6):
+curl -s $B/ -H 'Content-Type: application/json' \
+  -d '{"interface":{"Proxy0":{"ip":{"global":false,"name-servers":false},"ipv6":{"name-servers":false}}}}'; echo
 curl -s $B/ -H 'Content-Type: application/json' -d '{"system":{"configuration":{"save":{}}}}'; echo
-# 3) ПОВТОРИТЬ проверку — интернет на роутере должен вернуться при живом ProxyN
-curl -s -m 8 -o /dev/null -w 'after by-name=%{http_code} t=%{time_total}\n' https://api.ipify.org/
-curl -s -x socks5h://127.0.0.1:10808 -m 12 https://api.ipify.org; echo  # IP СЕРВЕРА?
-# 4) РЕВЕРТ (если что-то не так) — вернуть public:
-#   curl -s $B/ -H 'Content-Type: application/json' \
-#     -d '{"interface":{"Proxy0":{"security-level":"public"}}}'; \
-#   curl -s $B/ -H 'Content-Type: application/json' -d '{"system":{"configuration":{"save":{}}}}'
+# РЕШАЮЩИЙ ТЕСТ (сначала ВКЛючить подписку в keen-manager!):
+ps | grep -i '[x]ray'; (netstat -ltn 2>/dev/null||ss -ltn 2>/dev/null)|grep 10808
+curl -s $B/show/interface/Proxy0 | grep -iE 'state|connect'; echo
+curl -s $B/show/ip/route | grep -iE 'default|0\.0\.0\.0|Proxy'; echo
+curl -s -m 8 -o /dev/null -w 'raw-ip=%{http_code}\n' https://1.1.1.1/
+curl -s -m 8 -o /dev/null -w 'by-name=%{http_code}\n' https://api.ipify.org/
+curl -s -x socks5h://127.0.0.1:10808 -m 12 https://api.ipify.org; echo  # ждём IP СЕРВЕРА
 ```
 
 ### 12-я сессия (ЗАКРЫТА) — CLI + качество failover + nfqws2-паритет + дашборд; rc.2
