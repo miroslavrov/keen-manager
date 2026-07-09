@@ -94,6 +94,15 @@ tproxy, safety model, arch detection).
 > Requires a Keenetic router with USB/NAND storage, **Entware (opkg)**, and the
 > firmware components *IPv6 protocol* and *Netfilter subsystem kernel modules*.
 
+There are two ways to install. **Method A** is the one-liner. Use **Method B**
+when the router can't reach GitHub's release CDN — some ISPs reset the TLS
+connection to `objects.githubusercontent.com` (DPI/RST) even when `raw` and the
+API work, which shows up as `curl: (35) … Connection reset by peer` during the
+download. Method B copies the files over SSH instead, so the router makes no
+outbound connection at all.
+
+### Method A — one-line install (online)
+
 ```sh
 opkg update && opkg install curl
 curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/install.sh | sh
@@ -103,9 +112,110 @@ The installer detects your architecture, installs the right binary to
 `/opt/bin/keen-manager`, sets up the init script and ndm hook, and prints the web
 UI address (default `http://<router-lan-ip>:47115`).
 
-**Upgrade:** re-run the same command (the binary is replaced atomically and the
-service restarts). **Uninstall:** `curl -fsSL .../scripts/uninstall.sh | sh`
-(add `--purge` to also remove config/state).
+### Method B — offline install over SSH (download on a PC, copy to the router)
+
+Use this when the router itself can't download the release. Fetch the files on a
+machine that *can* reach GitHub (e.g. behind a VPN), then copy them across.
+
+1. **On your computer**, grab the installer and the binary for your router's
+   architecture. Pick the arch from this table (on the router run
+   `opkg print-architecture`, or `uname -m`):
+
+   | Keenetic CPU          | asset                    |
+   | --------------------- | ------------------------ |
+   | ARM64 (aarch64)       | `keen-manager-arm64.gz`  |
+   | ARMv7 (arm)           | `keen-manager-arm.gz`    |
+   | MIPS little-endian    | `keen-manager-mipsle.gz` |
+   | MIPS big-endian       | `keen-manager-mips.gz`   |
+
+   ```sh
+   # installer script
+   curl -fsSLO https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/install.sh
+   # matching binary (arm64 shown — swap for your arch) from the Releases page
+   curl -fsSLO https://github.com/miroslavrov/keen-manager/releases/latest/download/keen-manager-arm64.gz
+   ```
+
+2. **Copy both to the router** over SSH (adjust user/IP; `/tmp` is fine):
+
+   ```sh
+   scp install.sh keen-manager-arm64.gz admin@192.168.1.1:/tmp/
+   ```
+
+3. **On the router**, run the installer pointed at the local file — no network is
+   used for the download:
+
+   ```sh
+   KEEN_URL="file:///tmp/keen-manager-arm64.gz" KEEN_ARCH=arm64 sh /tmp/install.sh
+   ```
+
+   `KEEN_URL` accepts a `file://` URL or a plain local path; `KEEN_ARCH` skips
+   auto-detection. The installer still writes the init script and ndm hook and
+   starts the service, exactly like Method A.
+
+<details>
+<summary>Fully manual (no installer script)</summary>
+
+Copy the binary and the init script (`scripts/init.d/S99keen-manager` from this
+repo) to the router, then:
+
+```sh
+gzip -dc /tmp/keen-manager-arm64.gz > /opt/bin/keen-manager
+chmod +x /opt/bin/keen-manager
+/opt/bin/keen-manager version                     # sanity check it runs
+
+mkdir -p /opt/etc/init.d
+cp /tmp/S99keen-manager /opt/etc/init.d/S99keen-manager
+chmod +x /opt/etc/init.d/S99keen-manager
+
+/opt/bin/keen-manager install-hook                # optional: route-reapply hook
+/opt/etc/init.d/S99keen-manager start
+```
+</details>
+
+### Upgrade
+
+- **Method A:** re-run the one-liner — the binary is replaced atomically and the
+  service restarts.
+- **Method B:** copy the new `keen-manager-<arch>.gz` over and re-run the
+  `KEEN_URL=…` command (or, fully manual, overwrite `/opt/bin/keen-manager` and
+  run `/opt/etc/init.d/S99keen-manager restart`).
+
+### Manage the service
+
+```sh
+/opt/etc/init.d/S99keen-manager start
+/opt/etc/init.d/S99keen-manager stop
+/opt/etc/init.d/S99keen-manager restart
+/opt/etc/init.d/S99keen-manager status
+tail -f /opt/var/log/keen-manager.log     # daemon log
+```
+
+### Uninstall
+
+Stops the service and removes the binary, init script, and ndm hook. Config and
+state under `/opt/etc/keen-manager` are **kept** unless you pass `--purge`.
+
+```sh
+# online
+curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/uninstall.sh | sh
+
+# offline: copy scripts/uninstall.sh to the router, then
+sh /tmp/uninstall.sh                # add --purge to also delete config/state
+```
+
+<details>
+<summary>Fully manual uninstall</summary>
+
+```sh
+/opt/etc/init.d/S99keen-manager stop 2>/dev/null
+rm -f /opt/etc/init.d/S99keen-manager
+rm -f /opt/etc/ndm/netfilter.d/*keen-manager*
+rm -f /opt/bin/keen-manager
+rm -f /opt/var/run/keen-manager.pid
+# optional — wipe config, state, secrets, backups:
+rm -rf /opt/etc/keen-manager
+```
+</details>
 
 ## Build from source
 
@@ -276,18 +386,128 @@ keen-manager (один бинарь)
 > Нужен роутер Keenetic с USB/NAND-накопителем, **Entware (opkg)** и компоненты
 > прошивки *Протокол IPv6* и *Модули ядра подсистемы Netfilter*.
 
+Есть два способа. **Способ A** — одной строкой. **Способ B** нужен, когда роутер
+не может достучаться до CDN релизов GitHub — некоторые провайдеры сбрасывают
+TLS-соединение до `objects.githubusercontent.com` (DPI/RST), даже когда `raw` и
+API работают; в логе это выглядит как `curl: (35) … Connection reset by peer` при
+скачивании. Способ B переносит файлы по SSH, так что роутер вообще не делает
+исходящих подключений.
+
+### Способ A — одной строкой (онлайн)
+
 ```sh
 opkg update && opkg install curl
 curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/install.sh | sh
 ```
 
 Установщик определит архитектуру, поставит нужный бинарь в
-`/opt/bin/keen-manager`, настроит init-скрипт и ndm-хук и выведет адрес
-веб-морды (по умолчанию `http://<LAN-IP-роутера>:47115`).
+`/opt/bin/keen-manager`, настроит init-скрипт и ndm-хук и выведет адрес веб-морды
+(по умолчанию `http://<LAN-IP-роутера>:47115`).
 
-**Обновление:** повтори ту же команду (бинарь заменится атомарно, сервис
-перезапустится). **Удаление:** `curl -fsSL .../scripts/uninstall.sh | sh`
-(добавь `--purge`, чтобы удалить ещё и конфиг/состояние).
+### Способ B — оффлайн-установка по SSH (скачать на ПК, скопировать на роутер)
+
+Используй, когда сам роутер не может скачать релиз. Файлы качаешь на машине,
+которой GitHub доступен (например, под VPN), и переносишь на роутер.
+
+1. **На своём компьютере** скачай установщик и бинарь под архитектуру роутера.
+   Архитектуру возьми из таблицы (на роутере: `opkg print-architecture` или
+   `uname -m`):
+
+   | CPU Keenetic         | ассет                    |
+   | -------------------- | ------------------------ |
+   | ARM64 (aarch64)      | `keen-manager-arm64.gz`  |
+   | ARMv7 (arm)          | `keen-manager-arm.gz`    |
+   | MIPS little-endian   | `keen-manager-mipsle.gz` |
+   | MIPS big-endian      | `keen-manager-mips.gz`   |
+
+   ```sh
+   # скрипт установщика
+   curl -fsSLO https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/install.sh
+   # бинарь под свою архитектуру (показан arm64) со страницы Releases
+   curl -fsSLO https://github.com/miroslavrov/keen-manager/releases/latest/download/keen-manager-arm64.gz
+   ```
+
+2. **Скопируй оба файла на роутер** по SSH (подставь юзера/IP; `/tmp` подойдёт):
+
+   ```sh
+   scp install.sh keen-manager-arm64.gz admin@192.168.1.1:/tmp/
+   ```
+
+3. **На роутере** запусти установщик с локальным файлом — сеть для скачивания не
+   используется:
+
+   ```sh
+   KEEN_URL="file:///tmp/keen-manager-arm64.gz" KEEN_ARCH=arm64 sh /tmp/install.sh
+   ```
+
+   `KEEN_URL` принимает `file://`-URL или обычный локальный путь; `KEEN_ARCH`
+   пропускает автодетект. Установщик так же пишет init-скрипт и ndm-хук и
+   запускает сервис — как в способе A.
+
+<details>
+<summary>Полностью вручную (без установщика)</summary>
+
+Скопируй на роутер бинарь и init-скрипт (`scripts/init.d/S99keen-manager` из
+этого репозитория), затем:
+
+```sh
+gzip -dc /tmp/keen-manager-arm64.gz > /opt/bin/keen-manager
+chmod +x /opt/bin/keen-manager
+/opt/bin/keen-manager version                     # проверка, что бинарь запускается
+
+mkdir -p /opt/etc/init.d
+cp /tmp/S99keen-manager /opt/etc/init.d/S99keen-manager
+chmod +x /opt/etc/init.d/S99keen-manager
+
+/opt/bin/keen-manager install-hook                # опц.: хук переустановки маршрутов
+/opt/etc/init.d/S99keen-manager start
+```
+</details>
+
+### Обновление
+
+- **Способ A:** повтори однострочник — бинарь заменится атомарно, сервис
+  перезапустится.
+- **Способ B:** перекинь новый `keen-manager-<arch>.gz` и повтори команду с
+  `KEEN_URL=…` (или, вручную, перезапиши `/opt/bin/keen-manager` и выполни
+  `/opt/etc/init.d/S99keen-manager restart`).
+
+### Управление сервисом
+
+```sh
+/opt/etc/init.d/S99keen-manager start
+/opt/etc/init.d/S99keen-manager stop
+/opt/etc/init.d/S99keen-manager restart
+/opt/etc/init.d/S99keen-manager status
+tail -f /opt/var/log/keen-manager.log     # лог демона
+```
+
+### Удаление
+
+Останавливает сервис и удаляет бинарь, init-скрипт и ndm-хук. Конфиг и состояние
+в `/opt/etc/keen-manager` **сохраняются**, если не передать `--purge`.
+
+```sh
+# онлайн
+curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/uninstall.sh | sh
+
+# оффлайн: скопируй scripts/uninstall.sh на роутер, затем
+sh /tmp/uninstall.sh                # добавь --purge, чтобы удалить и конфиг/состояние
+```
+
+<details>
+<summary>Удаление полностью вручную</summary>
+
+```sh
+/opt/etc/init.d/S99keen-manager stop 2>/dev/null
+rm -f /opt/etc/init.d/S99keen-manager
+rm -f /opt/etc/ndm/netfilter.d/*keen-manager*
+rm -f /opt/bin/keen-manager
+rm -f /opt/var/run/keen-manager.pid
+# опционально — стереть конфиг, состояние, секреты, бэкапы:
+rm -rf /opt/etc/keen-manager
+```
+</details>
 
 ## Сборка из исходников
 
