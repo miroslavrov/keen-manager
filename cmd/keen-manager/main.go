@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -113,7 +114,24 @@ func openEngine() *engine.Engine {
 }
 
 func runDaemon() {
-	eng, err := engine.New(platform.DefaultPaths(), dryRun())
+	paths := platform.DefaultPaths()
+
+	// Single-instance guard: a second daemon writing the same state.json races
+	// the first (and double-drives the router), so refuse to start when one is
+	// already running. The flock releases itself if the holder dies, so a crash
+	// never leaves a stale lock behind. A missing/read-only lock dir is not fatal
+	// — we warn and continue rather than block startup on lock infrastructure.
+	lock, lockErr := platform.AcquireLock(paths.LockFile("keen-manager"))
+	switch {
+	case errors.Is(lockErr, platform.ErrLocked):
+		fatal("another keen-manager daemon is already running (%v); stop it first, or run `/opt/etc/init.d/S99keen-manager restart`", lockErr)
+	case lockErr != nil:
+		fmt.Fprintf(os.Stderr, "keen-manager: single-instance lock unavailable (%v); continuing without it\n", lockErr)
+	default:
+		defer lock.Release()
+	}
+
+	eng, err := engine.New(paths, dryRun())
 	if err != nil {
 		fatal("init: %v", err)
 	}

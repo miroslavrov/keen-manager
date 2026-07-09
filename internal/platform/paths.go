@@ -71,6 +71,12 @@ func (p Paths) PidFile(name string) string {
 	return filepath.Join(p.RunDir, name+".pid")
 }
 
+// LockFile returns the path to a component's single-instance flock (on tmpfs,
+// so it can never survive a reboot as a stale lock).
+func (p Paths) LockFile(name string) string {
+	return filepath.Join(p.RunDir, name+".lock")
+}
+
 // StateFile is the main persisted config document.
 func (p Paths) StateFile() string { return filepath.Join(p.DataDir, "state.json") }
 
