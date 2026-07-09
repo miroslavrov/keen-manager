@@ -21,6 +21,7 @@ type Paths struct {
 	NfqwsConfDir string // /opt/etc/nfqws2
 	NfqwsInit    string // /opt/etc/init.d/S51nfqws2
 	NfqwsBin     string // /opt/usr/bin/nfqws2
+	TpwsBin      string // /opt/usr/bin/tpws (zapret socket desync proxy)
 	XrayBin      string // /opt/sbin/xray
 	AwgBin       string // /opt/sbin/awg
 	IPBin        string // /opt/sbin/ip (ip-full)
@@ -43,6 +44,7 @@ func DefaultPaths() Paths {
 		NfqwsConfDir: filepath.Join(root, "etc", "nfqws2"),
 		NfqwsInit:    filepath.Join(root, "etc", "init.d", "S51nfqws2"),
 		NfqwsBin:     filepath.Join(root, "usr", "bin", "nfqws2"),
+		TpwsBin:      filepath.Join(root, "usr", "bin", "tpws"),
 		XrayBin:      filepath.Join(root, "sbin", "xray"),
 		AwgBin:       filepath.Join(root, "sbin", "awg"),
 		IPBin:        filepath.Join(root, "sbin", "ip"),
