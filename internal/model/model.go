@@ -247,6 +247,16 @@ type NfqwsStatusView struct {
 	Running   bool      `json:"running"`
 	Version   string    `json:"version,omitempty"`
 	Mode      NfqwsMode `json:"mode,omitempty"`
+	// KernelReady reports whether the netfilter modules nfqws2 needs
+	// (nfnetlink_queue, xt_NFQUEUE) are loaded or loadable on the device.
+	KernelReady bool `json:"kernel_ready"`
+	// MissingModules lists any required kernel modules that are neither loaded
+	// nor present on disk (empty when KernelReady).
+	MissingModules []string `json:"missing_modules,omitempty"`
+	// Healthy is the honest "actually working" signal: installed AND running AND
+	// the kernel modules are present. A running daemon without its NFQUEUE
+	// modules is up but inert, so it is reported unhealthy.
+	Healthy bool `json:"healthy"`
 }
 
 // RuntimeStatus is in-memory, non-persisted per-connection health.

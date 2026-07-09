@@ -78,6 +78,8 @@ func (c *Controller) Status() model.NfqwsStatusView {
 		if m, err := c.Mode(); err == nil {
 			v.Mode = m
 		}
+		v.KernelReady, v.MissingModules = c.KernelModulesStatus()
+		v.Healthy = v.Running && v.KernelReady
 	}
 	return v
 }
