@@ -365,11 +365,15 @@ Version metadata is injected at link time from git
 
 1. Require Entware (`/opt/bin` must exist).
 2. Detect arch (opkg → uname → ELF probe, per section 4).
-3. Download `keen-manager-<arch>.gz` from
-   `https://github.com/<repo>/releases/latest/download/…` (overridable via
-   `KEEN_VERSION`/`KEEN_URL`), verify it is a non-empty valid gzip, and install
-   it atomically to `/opt/bin/keen-manager` — a failed download leaves any
-   existing install untouched.
+3. Resolve the newest release tag — highest SemVer over the `/releases` API,
+   pre-releases included. The list API is **not** dependably newest-first (it is
+   neither SemVer- nor publish-time-ordered — `beta.10` can come back behind
+   `beta.9`), so `install.sh` picks the max itself in pure awk rather than
+   trusting position `[0]`; it falls back to the `latest/download` redirect only
+   when the API is unreachable. Then download `keen-manager-<arch>.gz` for that
+   tag (overridable via `KEEN_VERSION`/`KEEN_URL`), verify it is a non-empty
+   valid gzip, and install it atomically to `/opt/bin/keen-manager` — a failed
+   download leaves any existing install untouched.
 4. Install the init script to `/opt/etc/init.d/S99keen-manager`.
 5. Best-effort `keen-manager install-hook` to register the ndm reapply hook.
 6. Start (or restart, on upgrade) the service and print the LAN web-UI URL.

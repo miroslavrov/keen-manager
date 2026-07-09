@@ -144,21 +144,57 @@ case "$ARCH" in
 esac
 log "detected architecture: ${ARCH}"
 
-# --- Resolve the newest release tag (including pre-releases) ----------------
-# GitHub's /releases/latest/download/ redirect ONLY points at the newest *full*
-# release, so a project that has published only pre-releases (betas) 404s there.
-# Query the API (results are newest-first and DO include pre-releases) and take
-# the first tag_name. POSIX sed only, so it works under busybox.
+# --- Resolve the newest release tag (highest SemVer, incl. pre-releases) -----
+# Two GitHub gotchas this has to survive:
+#   1. The /releases/latest/download/ redirect only points at the newest *full*
+#      release, so a repo that has published only pre-releases (betas) 404s
+#      there.
+#   2. The /releases list API is NOT dependably newest-first — it is neither
+#      SemVer- nor publish-time-ordered. Observed in the wild on this very repo:
+#      v0.1.0-beta.10 comes back *behind* v0.1.0-beta.9, so grabbing the first
+#      element installs a stale build.
+# So pull the whole list and pick the highest SemVer ourselves. POSIX sh + awk
+# only (busybox-safe: no `sort -V`, no gawk-only extensions).
 resolve_latest_tag() {
-	_api="https://api.github.com/repos/${REPO}/releases?per_page=1"
+	_api="https://api.github.com/repos/${REPO}/releases?per_page=100"
 	if [ "$DL" = "curl" ]; then
 		_json=$(curl -fsSL -H "Accept: application/vnd.github+json" "$_api" 2>/dev/null)
 	else
 		_json=$(wget -qO- --header="Accept: application/vnd.github+json" "$_api" 2>/dev/null)
 	fi
 	[ -n "$_json" ] || return 1
-	printf '%s\n' "$_json" | grep '"tag_name"' | head -n1 \
-		| sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//; s/".*//'
+	printf '%s\n' "$_json" \
+		| grep '"tag_name"' \
+		| sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//; s/".*//' \
+		| semver_max
+}
+
+# semver_max: read version tags (vMAJOR.MINOR.PATCH[-prerelease]) on stdin and
+# print the highest by SemVer precedence — release fields compared numerically,
+# a release with no -prerelease outranking one that has one, and prerelease
+# identifiers compared numerically when both are numeric else lexically (so
+# beta.10 > beta.9, and 1.0.0 > 1.0.0-beta.1). Pure awk => runs under busybox.
+semver_max() {
+	awk '
+	function rel(v,  s){ s=v; sub(/^[vV]/,"",s); sub(/[-+].*/,"",s); return s }
+	function pre(v,  s){ if (v !~ /-/) return ""; s=v; sub(/^[^-]*-/,"",s); sub(/\+.*/,"",s); return s }
+	function cmpnum(a,b,  na,nb,i,m,x,y){
+		na=split(a,A,"."); nb=split(b,B,"."); m=(na>nb)?na:nb
+		for(i=1;i<=m;i++){ x=(i<=na)?A[i]+0:0; y=(i<=nb)?B[i]+0:0
+			if(x>y)return 1; if(x<y)return -1 }
+		return 0 }
+	function cmppre(a,b,  na,nb,i,m,x,y,xn,yn){
+		if(a==""&&b=="")return 0; if(a=="")return 1; if(b=="")return -1   # no-pre outranks pre
+		na=split(a,A,"."); nb=split(b,B,"."); m=(na<nb)?na:nb
+		for(i=1;i<=m;i++){ x=A[i]; y=B[i]; xn=(x ~ /^[0-9]+$/); yn=(y ~ /^[0-9]+$/)
+			if(xn&&yn){ if(x+0>y+0)return 1; if(x+0<y+0)return -1 }
+			else if(xn){ return -1 } else if(yn){ return 1 }
+			else { if(x>y)return 1; if(x<y)return -1 } }
+		if(na>nb)return 1; if(na<nb)return -1; return 0 }
+	function gt(v,w,  c){ c=cmpnum(rel(v),rel(w)); if(c)return (c>0); return (cmppre(pre(v),pre(w))>0) }
+	{ t=$0; sub(/[ \t\r]+$/,"",t); if(t=="")next; if(best==""||gt(t,best))best=t }
+	END{ if(best!="")print best }
+	'
 }
 
 # --- Resolve download URL ---------------------------------------------------

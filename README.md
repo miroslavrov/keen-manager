@@ -131,8 +131,11 @@ machine that *can* reach GitHub (e.g. behind a VPN), then copy them across.
    ```sh
    # installer script
    curl -fsSLO https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/install.sh
-   # matching binary (arm64 shown — swap for your arch) from the Releases page
-   curl -fsSLO https://github.com/miroslavrov/keen-manager/releases/latest/download/keen-manager-arm64.gz
+   # matching binary (arm64 shown — swap for your arch). Betas are pre-releases,
+   # so the 'latest/download' shortcut does NOT resolve yet — grab the newest tag
+   # from the Releases page: https://github.com/miroslavrov/keen-manager/releases
+   TAG=v0.1.0-beta.10   # ← replace with the newest tag listed there
+   curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/${TAG}/keen-manager-arm64.gz"
    ```
 
 2. **Copy both to the router.** Put them in **`/opt/tmp`** (Entware's storage),
@@ -432,8 +435,11 @@ curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scrip
    ```sh
    # скрипт установщика
    curl -fsSLO https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/install.sh
-   # бинарь под свою архитектуру (показан arm64) со страницы Releases
-   curl -fsSLO https://github.com/miroslavrov/keen-manager/releases/latest/download/keen-manager-arm64.gz
+   # бинарь под свою архитектуру (показан arm64). Бета — это pre-release, поэтому
+   # ярлык 'latest/download' пока НЕ срабатывает — возьми самый свежий тег со
+   # страницы Releases: https://github.com/miroslavrov/keen-manager/releases
+   TAG=v0.1.0-beta.10   # ← замени на самый свежий тег оттуда
+   curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/${TAG}/keen-manager-arm64.gz"
    ```
 
 2. **Скопируй оба файла на роутер** в **`/opt/tmp`** (хранилище Entware), по SSH
