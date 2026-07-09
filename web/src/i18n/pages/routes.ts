@@ -20,6 +20,9 @@ export const routes = {
     groupInterfaces: 'Router interfaces',
     groupXray: 'Xray tunnels',
     xrayTargetHint: 'selected services via Xray, the rest direct',
+    groupBypass: 'DPI bypass',
+    bypassTarget: 'DPI Bypass',
+    bypassTargetHint: 'selected domains via nfqws/tpws desync',
     ifaceDown: 'down',
     dnsUnavailable:
       'Native DNS routing isn’t available on this firmware, so routes can’t be applied — it needs KeeneticOS 5.x with AWG2 support.',
@@ -132,6 +135,9 @@ export const routes = {
     groupInterfaces: 'Интерфейсы роутера',
     groupXray: 'Xray-туннели',
     xrayTargetHint: 'выбранные сервисы через Xray, остальное напрямую',
+    groupBypass: 'Обход DPI',
+    bypassTarget: 'Обход DPI',
+    bypassTargetHint: 'выбранные домены через десинхронизацию nfqws/tpws',
     ifaceDown: 'выкл',
     dnsUnavailable:
       'На этой прошивке штатная DNS-маршрутизация недоступна, применить маршруты нельзя — нужен KeeneticOS 5.x с поддержкой AWG2.',

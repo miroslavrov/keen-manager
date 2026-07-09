@@ -12,6 +12,7 @@ import {
   RotateCw,
   Save,
   Search,
+  ShieldCheck,
   ShieldOff,
   SlidersHorizontal,
   Square,
@@ -93,6 +94,8 @@ export function BypassPage() {
         />
       )}
 
+      <RoutableBypassCard />
+
       <Tabs defaultValue="config">
         <TabsList>
           <TabsTrigger value="config">{t('bypass.tabConfig')}</TabsTrigger>
@@ -111,6 +114,180 @@ export function BypassPage() {
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+// RoutableBypassCard exposes DPI bypass as ONE routable interface (the user's
+// P1 request: nfqws "like Xray"). keen-manager runs a local tpws SOCKS proxy
+// and registers a managed KeeneticOS Proxy interface pointing at it; chosen
+// domains are then routed through it from the Routes page (target "DPI Bypass")
+// — not a global inline NFQUEUE. The desync strategy is edited here; only the
+// domains are picked on the Routes page (one shared source of domains).
+function RoutableBypassCard() {
+  const t = useT()
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const { data: bypass, isLoading } = useQuery({
+    queryKey: ['bypass'],
+    queryFn: api.bypass,
+    refetchInterval: 8000,
+  })
+
+  const [strategy, setStrategy] = React.useState('')
+  const [port, setPort] = React.useState('')
+  const [dirty, setDirty] = React.useState(false)
+  React.useEffect(() => {
+    if (bypass && !dirty) {
+      setStrategy(bypass.strategy ?? '')
+      setPort(bypass.port ? String(bypass.port) : '')
+    }
+  }, [bypass, dirty])
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['bypass'] })
+    queryClient.invalidateQueries({ queryKey: ['routes'] })
+    queryClient.invalidateQueries({ queryKey: ['interfaces'] })
+  }
+
+  const toggleMutation = useMutation({
+    mutationFn: (enabled: boolean) => api.saveBypass({ enabled }),
+    onSuccess: (v) => {
+      invalidate()
+      toast({
+        variant: 'success',
+        title: v.enabled
+          ? t('bypass.routableEnabled')
+          : t('bypass.routableDisabled'),
+      })
+    },
+    onError: (err: Error) =>
+      toast({
+        variant: 'error',
+        title: t('bypass.routableError'),
+        description: err.message,
+      }),
+  })
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      api.saveBypass({ strategy: strategy.trim(), port: Number(port) || 0 }),
+    onSuccess: () => {
+      setDirty(false)
+      invalidate()
+      toast({ variant: 'success', title: t('bypass.strategySaved') })
+    },
+    onError: (err: Error) =>
+      toast({
+        variant: 'error',
+        title: t('bypass.routableError'),
+        description: err.message,
+      }),
+  })
+
+  if (isLoading) return <Skeleton className="h-40" />
+
+  const enabled = !!bypass?.enabled
+  const installed = !!bypass?.installed
+  const running = !!bypass?.running
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-start justify-between space-y-0">
+        <div className="min-w-0 space-y-1">
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-emerald-400" />
+            {t('bypass.routableTitle')}
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            {t('bypass.routableDesc')}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 pl-3">
+          <Label htmlFor="bypass-enabled" className="text-xs text-muted-foreground">
+            {enabled ? t('bypass.on') : t('bypass.off')}
+          </Label>
+          <Switch
+            id="bypass-enabled"
+            checked={enabled}
+            disabled={toggleMutation.isPending}
+            onCheckedChange={(v) => toggleMutation.mutate(v)}
+          />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={installed ? 'success' : 'warning'}>
+            {installed ? t('bypass.tpwsInstalled') : t('bypass.tpwsMissing')}
+          </Badge>
+          {enabled ? (
+            <Badge variant={running ? 'success' : 'muted'}>
+              {running ? t('bypass.running') : t('bypass.stopped')}
+            </Badge>
+          ) : null}
+          {bypass?.interface ? (
+            <Badge variant="secondary" className="font-mono">
+              {bypass.interface} · 127.0.0.1:{bypass.port}
+            </Badge>
+          ) : null}
+        </div>
+
+        {bypass?.note ? (
+          <p className="text-xs text-muted-foreground">{bypass.note}</p>
+        ) : null}
+
+        <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
+          <div className="space-y-1.5">
+            <Label htmlFor="bypass-strategy">{t('bypass.strategyLabel')}</Label>
+            <Input
+              id="bypass-strategy"
+              value={strategy}
+              spellCheck={false}
+              className="font-mono text-xs"
+              placeholder="--split-tls=sni --disorder"
+              onChange={(e) => {
+                setStrategy(e.target.value)
+                setDirty(true)
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('bypass.strategyHint')}
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bypass-port">{t('bypass.portLabel')}</Label>
+            <Input
+              id="bypass-port"
+              value={port}
+              inputMode="numeric"
+              className="font-mono text-xs"
+              placeholder="10809"
+              onChange={(e) => {
+                setPort(e.target.value.replace(/[^0-9]/g, ''))
+                setDirty(true)
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            {t('bypass.routableRoutesHint')}
+          </p>
+          <Button
+            size="sm"
+            disabled={!dirty || saveMutation.isPending}
+            onClick={() => saveMutation.mutate()}
+          >
+            {saveMutation.isPending ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            {t('bypass.saveStrategy')}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

@@ -5,6 +5,7 @@
 import type {
   AppState,
   AuthState,
+  Bypass,
   Conn,
   ConnDetail,
   DomainCheck,
@@ -115,6 +116,18 @@ export const mockNfqws: Nfqws = {
   kernel_ready: true,
   missing_modules: [],
   healthy: true,
+}
+
+export const mockBypass: Bypass = {
+  enabled: true,
+  installed: true,
+  running: true,
+  interface: 'Proxy1',
+  port: 10809,
+  strategy: '--split-tls=sni --disorder',
+  routable: true,
+  target: 'bypass',
+  note: 'route domains through DPI bypass from the Routes page (target: DPI Bypass).',
 }
 
 // mockImportResult synthesises a plausible split-import outcome for DEV/tests.

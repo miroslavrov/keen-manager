@@ -13,6 +13,7 @@ import * as mocks from './mocks'
 import type {
   AppState,
   AuthState,
+  Bypass,
   Conn,
   ConnDetail,
   ConnType,
@@ -451,6 +452,18 @@ export const api = {
     withOk<DomainCheck>(
       () => request('/nfqws/check-domain', { method: 'POST', body: { domain } }),
       () => mocks.mockDomainCheck(domain),
+    ),
+
+  // ---- DPI bypass (routable tpws interface) ----
+  bypass: () =>
+    withMock<Bypass>(() => request('/bypass'), () => mocks.mockBypass),
+
+  saveBypass: (
+    body: Partial<{ enabled: boolean; strategy: string; port: number }>,
+  ) =>
+    withOk<Bypass>(
+      () => request('/bypass', { method: 'PUT', body }),
+      () => ({ ...mocks.mockBypass, ...body }),
     ),
 
   // ---- failover ----

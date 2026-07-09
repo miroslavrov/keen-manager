@@ -13,6 +13,7 @@ import {
   Plus,
   Search,
   ShieldBan,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Users,
@@ -136,6 +137,14 @@ export function RoutesPage() {
     queryFn: api.interfaces,
     refetchInterval: 15000,
   })
+  // DPI-bypass exit point (tpws → managed Proxy interface). When enabled it is
+  // an additional route target, so a route can send chosen domains through DPI
+  // bypass exactly like a VPN tunnel — one shared source of domains with Routes.
+  const { data: bypass } = useQuery({
+    queryKey: ['bypass'],
+    queryFn: api.bypass,
+    refetchInterval: 15000,
+  })
 
   // AmneziaWG connections back a router-native dns-proxy route (via their native
   // WireguardN interface).
@@ -179,9 +188,30 @@ export function RoutesPage() {
     [ifaceData, connIds],
   )
 
+  // The DPI-bypass interface is offered as a single reserved target
+  // ("conn:bypass") whenever the feature is enabled — decodeTarget maps it to
+  // target_conn_id="bypass", which the daemon resolves to the managed tpws
+  // Proxy interface (pending until it exists, like an Xray route).
+  const bypassOptions = React.useMemo<TargetOption[]>(
+    () =>
+      bypass?.enabled
+        ? [
+            {
+              value: 'conn:bypass',
+              label: t('routes.bypassTarget'),
+              hint: t('routes.bypassTargetHint'),
+            },
+          ]
+        : [],
+    [bypass, t],
+  )
+
   const allValues = React.useMemo(
-    () => [...connOptions, ...xrayOptions, ...ifaceOptions].map((o) => o.value),
-    [connOptions, xrayOptions, ifaceOptions],
+    () =>
+      [...connOptions, ...xrayOptions, ...ifaceOptions, ...bypassOptions].map(
+        (o) => o.value,
+      ),
+    [connOptions, xrayOptions, ifaceOptions, bypassOptions],
   )
   const hasTarget = allValues.length > 0
   const [target, setTarget] = React.useState<string>('')
@@ -203,6 +233,7 @@ export function RoutesPage() {
         connOptions={connOptions}
         xrayOptions={xrayOptions}
         ifaceOptions={ifaceOptions}
+        bypassOptions={bypassOptions}
         value={target}
         onChange={setTarget}
         dnsAvailable={dnsAvailable}
@@ -234,6 +265,7 @@ function TargetPicker({
   connOptions,
   xrayOptions,
   ifaceOptions,
+  bypassOptions,
   value,
   onChange,
   dnsAvailable,
@@ -242,6 +274,7 @@ function TargetPicker({
   connOptions: TargetOption[]
   xrayOptions: TargetOption[]
   ifaceOptions: TargetOption[]
+  bypassOptions: TargetOption[]
   value: string
   onChange: (v: string) => void
   dnsAvailable: boolean
@@ -249,7 +282,10 @@ function TargetPicker({
 }) {
   const t = useT()
   const hasAny =
-    connOptions.length > 0 || xrayOptions.length > 0 || ifaceOptions.length > 0
+    connOptions.length > 0 ||
+    xrayOptions.length > 0 ||
+    ifaceOptions.length > 0 ||
+    bypassOptions.length > 0
   // Native DNS routing only gates the AWG/interface (dns-proxy) path; Xray
   // routes are compiled into the Xray config and don't need it, so the warning
   // is suppressed when the only available targets are Xray tunnels.
@@ -338,6 +374,31 @@ function TargetPicker({
                       </span>
                       {o.live === false ? (
                         <span className="text-warning"> · {t('routes.ifaceDown')}</span>
+                      ) : null}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ) : null}
+              {bypassOptions.length > 0 &&
+              (connOptions.length > 0 ||
+                xrayOptions.length > 0 ||
+                ifaceOptions.length > 0) ? (
+                <SelectSeparator />
+              ) : null}
+              {bypassOptions.length > 0 ? (
+                <SelectGroup>
+                  <SelectLabel className="flex items-center gap-1.5">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    {t('routes.groupBypass')}
+                  </SelectLabel>
+                  {bypassOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                      {o.hint ? (
+                        <span className="text-muted-foreground">
+                          {' · '}
+                          {o.hint}
+                        </span>
                       ) : null}
                     </SelectItem>
                   ))}

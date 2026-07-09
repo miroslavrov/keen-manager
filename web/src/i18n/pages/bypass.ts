@@ -25,6 +25,26 @@ export const bypass = {
     kernelMissingDesc:
       'Running, but the NFQUEUE kernel modules are absent — the bypass is inert until they load: {modules}',
 
+    // Routable bypass interface (tpws → one managed KeeneticOS Proxy connection)
+    routableTitle: 'Routable bypass interface',
+    routableDesc:
+      'Expose DPI bypass as ONE routable interface, like a VPN. keen-manager runs a local tpws (zapret’s socket desync proxy) and registers a single Keenetic Proxy connection pointing at it; route chosen domains through it from the Routes page — not a global inline NFQUEUE.',
+    on: 'On',
+    off: 'Off',
+    tpwsInstalled: 'tpws installed',
+    tpwsMissing: 'tpws not installed',
+    strategyLabel: 'Desync strategy (tpws)',
+    strategyHint:
+      'tpws arguments applied to routed traffic. Tune on-device for your ISP — e.g. --split-tls=sni --disorder, --split-pos=1, --oob.',
+    portLabel: 'SOCKS port',
+    routableRoutesHint:
+      'Choose which domains go through DPI bypass on the Routes page (target “DPI Bypass”). Discord + YouTube defaults are seeded on first enable.',
+    saveStrategy: 'Save',
+    routableEnabled: 'DPI bypass interface enabled',
+    routableDisabled: 'DPI bypass interface disabled',
+    routableError: 'Could not update DPI bypass',
+    strategySaved: 'Bypass strategy saved',
+
     // Tabs
     tabConfig: 'Config',
     tabHostlists: 'Hostlists',
@@ -140,6 +160,26 @@ export const bypass = {
     kernelMissing: 'Нет модулей NFQUEUE',
     kernelMissingDesc:
       'Работает, но модули ядра NFQUEUE отсутствуют — обход бездействует, пока они не загрузятся: {modules}',
+
+    // Обход DPI как маршрутизируемый интерфейс (tpws → одно Прокси-подключение)
+    routableTitle: 'Обход DPI как интерфейс',
+    routableDesc:
+      'Показать обход DPI как ОДИН маршрутизируемый интерфейс, как VPN. keen-manager запускает локальный tpws (сокетный десинхро-прокси из zapret) и регистрирует одно Прокси-подключение Keenetic на него; выбранные домены направляются через него со страницы «Маршруты» — а не глобальным инлайн-NFQUEUE.',
+    on: 'Вкл',
+    off: 'Выкл',
+    tpwsInstalled: 'tpws установлен',
+    tpwsMissing: 'tpws не установлен',
+    strategyLabel: 'Стратегия десинхронизации (tpws)',
+    strategyHint:
+      'Аргументы tpws для проходящего трафика. Подбирайте под вашего провайдера на устройстве — напр. --split-tls=sni --disorder, --split-pos=1, --oob.',
+    portLabel: 'Порт SOCKS',
+    routableRoutesHint:
+      'Выберите домены для обхода DPI на странице «Маршруты» (цель «Обход DPI»). При первом включении добавляются дефолты для Discord и YouTube.',
+    saveStrategy: 'Сохранить',
+    routableEnabled: 'Интерфейс обхода DPI включён',
+    routableDisabled: 'Интерфейс обхода DPI выключен',
+    routableError: 'Не удалось обновить обход DPI',
+    strategySaved: 'Стратегия обхода сохранена',
 
     // Tabs
     tabConfig: 'Конфигурация',

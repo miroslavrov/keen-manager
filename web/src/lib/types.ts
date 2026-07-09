@@ -98,6 +98,30 @@ export interface NfqwsConfig {
   mode: NfqwsMode
 }
 
+/** GET/PUT /api/bypass: the routable DPI-bypass feature. tpws (zapret's
+ * socket-level desync proxy) is exposed as ONE managed KeeneticOS Proxy
+ * interface; domains are routed through it per-service from the Routes page
+ * (target "bypass"), like a VPN tunnel, instead of a global inline NFQUEUE.
+ * Mirrors engine.BypassView. */
+export interface Bypass {
+  enabled: boolean
+  /** tpws binary present on the device. */
+  installed: boolean
+  /** tpws daemon currently running (best-effort; false off-device). */
+  running: boolean
+  /** Managed Proxy interface name once registered (e.g. "Proxy1"). */
+  interface?: string
+  /** Local tpws SOCKS port the Proxy interface points at. */
+  port: number
+  /** tpws desync argument string (tuned on-device). */
+  strategy: string
+  /** True once a route can bind to the bypass exit point. */
+  routable: boolean
+  /** Reserved Routes target id for the bypass interface ("bypass"). */
+  target: string
+  note?: string
+}
+
 /** Structured nfqws2.conf, mirrors internal/nfqws.Conf. Only the fields the
  * form edits are typed; the round-trip parser preserves everything else. */
 export interface NfqwsConf {
