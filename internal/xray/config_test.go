@@ -105,6 +105,55 @@ func TestBuildConfigSplitTunnel(t *testing.T) {
 	}
 }
 
+// TestAPIServicesMatchFeatures guards the session-7 "not all dependencies are
+// resolved" crash: a pinned single-server config emits no observatory, so it
+// must NOT advertise ObservatoryService; the balancer config emits a
+// burstObservatory, so it may.
+func TestAPIServicesMatchFeatures(t *testing.T) {
+	has := func(list []string, want string) bool {
+		for _, s := range list {
+			if s == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Single pinned server (what activation / select-best builds).
+	single, err := BuildConfig([]model.Server{sampleReality("a", "1.1.1.1")}, Defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if single.API == nil {
+		t.Fatal("expected an api block")
+	}
+	if has(single.API.Services, "ObservatoryService") {
+		t.Errorf("single-server config must not advertise ObservatoryService (no observatory feature): %v", single.API.Services)
+	}
+	for _, must := range []string{"HandlerService", "StatsService", "RoutingService"} {
+		if !has(single.API.Services, must) {
+			t.Errorf("api.services missing %q: %v", must, single.API.Services)
+		}
+	}
+	if single.BurstObservatory != nil {
+		t.Error("single-server config should not carry a burstObservatory")
+	}
+
+	// Balancer over 2 servers: observatory present → service may be advertised.
+	optsB := Defaults()
+	optsB.EnableBalancer = true
+	bal, err := BuildConfig([]model.Server{sampleReality("a", "1.1.1.1"), sampleReality("b", "2.2.2.2")}, optsB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bal.BurstObservatory == nil {
+		t.Fatal("balancer config should carry a burstObservatory")
+	}
+	if !has(bal.API.Services, "ObservatoryService") {
+		t.Errorf("balancer config should advertise ObservatoryService: %v", bal.API.Services)
+	}
+}
+
 func TestBuildConfigFullTunnelHasNoDirectCatchAll(t *testing.T) {
 	cfg, err := BuildConfig([]model.Server{sampleReality("a", "1.1.1.1")}, Defaults())
 	if err != nil {

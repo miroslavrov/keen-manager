@@ -143,13 +143,25 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 		opts = mergeDefaults(opts)
 	}
 
+	// The balancer (and its observatory) only exist with more than one server.
+	useBalancer := opts.EnableBalancer && len(servers) > 1
+
+	// api.services must only list services whose backing feature is present, or
+	// xray-core aborts startup with "not all dependencies are resolved".
+	// ObservatoryService depends on an observatory, which we emit ONLY in
+	// balancer mode — so a pinned single-server config must not advertise it.
+	apiServices := []string{"HandlerService", "StatsService", "RoutingService"}
+	if useBalancer {
+		apiServices = append(apiServices, "ObservatoryService")
+	}
+
 	cfg := &Config{
 		Log:   &Log{Loglevel: def(opts.LogLevel, "warning")},
 		Stats: &struct{}{},
 		API: &API{
 			Tag:      "api",
 			Listen:   fmt.Sprintf("127.0.0.1:%d", opts.APIPort),
-			Services: []string{"HandlerService", "StatsService", "RoutingService", "ObservatoryService"},
+			Services: apiServices,
 		},
 	}
 
@@ -215,7 +227,7 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 	splitSubnets := trimAll(opts.SplitSubnets)
 	split := len(splitDomains) > 0 || len(splitSubnets) > 0
 
-	if opts.EnableBalancer && len(tags) > 1 {
+	if useBalancer {
 		cfg.Routing.Balancers = []Balancer{{
 			Tag:         "auto",
 			Selector:    []string{opts.TagPrefix},
