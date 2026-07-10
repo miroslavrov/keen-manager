@@ -1,146 +1,212 @@
 #!/bin/sh
-# keen-manager — tunnel diagnostic v3 (session 15).
+# keen-manager — tunnel diagnostic v4 (session 17).
 #
-# WHY (session-15 pivot): the SAME vless-reality-vision config works on the
-# user's PC and phone on the SAME LAN — only the router fails. That rules out a
-# general DPI block and the server (they'd kill the PC/phone too) and points at
-# a router-LOCAL cause. Prime suspect: MSS/MTU. LAN traffic FORWARDED through the
-# router is MSS-clamped-to-PMTU by KeeneticOS, but Xray's OWN egress to the
-# server is a router-local socket (OUTPUT chain) that is NOT clamped — so on a
-# reduced-MTU / TSPU WAN the small reality handshake gets through while full-size
-# data segments blackhole. Symptom: "tunnel establishes, payload never flows".
+# WHY v4 (session-16 pivot): the SAME vless-reality-vision config connects from
+# the user's PC and phone on the SAME LAN — only the router fails. Verified vs
+# the XKeen canon, our outbound is byte-for-byte correct, so the bug is NOT the
+# config's shape. The one thing that differs between the (working) phone and the
+# (failing) router is HOW traffic enters Xray: the router uses a transparent
+# TPROXY + dokodemo-door capture, while the phone uses a plain SOCKS/tun client.
+# v3 was inconclusive because it hid xray's own output behind `| tail` and never
+# proved xray even started. v4 answers three questions UNAMBIGUOUSLY:
 #
-# WHAT THIS PROVES: it runs the tunnel outbound three+ ways through a local
-# SOCKS and shows which one carries traffic:
-#   - xray-plain    : sockopt as keen-manager ships it (mark 255, no clamp)   [reproduces the failure]
-#   - xray-mss1380  : + tcpMaxSeg 1380  (keen-manager's DEFAULT clamp)        [validates the shipped fix]
-#   - xray-mss1280  : + tcpMaxSeg 1280  (aggressive fallback)                 [brackets the needed value]
-# If a clamped variant carries traffic while xray-plain does not, MSS/MTU is
-# CONFIRMED and the fix is proven — set it on the Settings page (MSS clamp).
+#   A) FREEDOM control (socks -> freedom)     : does xray RUN on this device and
+#      is the box's own egress alive?  A pass returns the ROUTER's WAN IP.
+#   B) REALITY via plain SOCKS (socks -> srv) : does the active server carry
+#      traffic the SAME way the phone reaches it — NO tproxy/dokodemo? A pass
+#      returns the SERVER's IP.
+#   C) it NEVER hides failure: it echoes the generated config, prints the full
+#      `xray -test` output + its exit code, says whether the process stayed
+#      alive, and cats the whole run log (never `| tail`).
 #
-# SAFETY: read-only. Does NOT touch the keen-manager service, iptables, ip rules
-# or routes. Spawns short-lived xray on 10810-10813 (self-terminating watchdog,
-# no dependency on `timeout` — busybox may not ship it). Run with the blanc
-# tunnel OFF (normal internet, :10808 free); the script uses its own ports.
+# READ THE RESULT (this is the session-17 P0.2 fork):
+#   * A empty  -> xray does NOT start here, or the box has no direct internet.
+#                 Nothing else below is meaningful. Read the -test output + log.
+#   * A passes, B passes (SERVER ip) -> reality works through plain SOCKS, just
+#                 like the phone. The bug is the ROUTER's TPROXY/dokodemo capture
+#                 -> switch the install to the Proxy-client path (Settings ->
+#                 Xray integration = "proxy"). This is the likely outcome.
+#   * A passes, B empty -> reality from THIS box fails even through plain SOCKS
+#                 (deeper than capture: server/transport/DPI on this node). Read
+#                 the log line (reset / i/o timeout / REALITY invalid) and retry
+#                 with a WS node from the subscription instead of reality-vision.
 #
-# Usage (pin to a commit so the CDN can't serve a stale copy):
-#   curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scripts/diag-tunnel.sh | sh
+# SAFETY: read-only. Does NOT touch the keen-manager service, iptables, ip rules,
+# routes, or the live config. Spawns a short-lived xray on 10814/10815 with a
+# self-terminating watchdog (busybox has no `timeout`). Safe to run with the
+# tunnel ON or OFF — it uses its own ports and its own throwaway configs.
+#
+# Reality CANNOT be validated from the cloud sandbox (it MITMs TLS); this script
+# is meant to run ON THE DEVICE:
+#   curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/<commit>/scripts/diag-tunnel.sh | sh
 
 CFG="${KEEN_XRAY_CONFIG:-/opt/etc/keen-manager/xray/config.json}"
 XRAY="${XRAY_BIN:-/opt/sbin/xray}"
 TMP="${KEEN_TMP:-/opt/tmp}"
-mkdir -p "$TMP"
+FPORT="${KEEN_FREEDOM_PORT:-10814}"   # socks -> freedom control
+RPORT="${KEEN_REALITY_PORT:-10815}"   # socks -> server (reality) probe
+WATCHDOG="${KEEN_WATCHDOG_SECS:-45}"  # backstop kill if the script is interrupted
+mkdir -p "$TMP" 2>/dev/null
 
-echo "=================== keen-manager tunnel diag v3 ==================="
-[ -x "$XRAY" ] || { echo "!! no xray at $XRAY"; exit 1; }
-"$XRAY" -version 2>/dev/null | head -1
-[ -f "$CFG" ] || { echo "!! no config at $CFG — activate a server once so it is generated"; exit 1; }
-command -v jq >/dev/null 2>&1 || { echo "!! jq missing (opkg install jq)"; exit 1; }
+# redact_secrets masks the credential fields (vless/vmess "id", trojan/ss
+# "password") when we echo a generated config, so a pasted diag never leaks the
+# live UUID/password. Uses busybox-safe BRE only (no oniguruma).
+redact_secrets() {
+	sed -e 's/\("id"[[:space:]]*:[[:space:]]*"\)[^"]*"/\1***redacted***"/g' \
+	    -e 's/\("password"[[:space:]]*:[[:space:]]*"\)[^"]*"/\1***redacted***"/g'
+}
+
+echo "=================== keen-manager tunnel diag v4 ==================="
+echo "date        : $(date 2>/dev/null)"
+echo "xray bin    : $XRAY"
+if [ ! -x "$XRAY" ]; then echo "!! FATAL: no executable xray at $XRAY"; exit 1; fi
+VER=$("$XRAY" -version 2>&1 | head -1)
+echo "xray version: ${VER:-<none — xray -version printed nothing>}"
+echo "config      : $CFG"
+if [ ! -f "$CFG" ]; then
+	echo "!! FATAL: no config at $CFG — activate a server once so it is generated."
+	exit 1
+fi
+if ! command -v jq >/dev/null 2>&1; then
+	echo "!! FATAL: jq missing (opkg install jq) — needed to read the live config."
+	exit 1
+fi
 echo
 
-# ---- server endpoint + reality SNI (from live config) ----------------------
-EP=$(jq -r '(.outbounds[]|select(.protocol=="vless" or .protocol=="vmess" or .protocol=="trojan" or .protocol=="shadowsocks")|(.settings.vnext//.settings.servers)[0]|"\(.address) \(.port)")' "$CFG" 2>/dev/null | head -1)
+# ---- what is the active server? (from the live config) ---------------------
+# jq here uses ONLY == / or (busybox jq has no oniguruma → no test()/match()).
+SRVFILTER='.outbounds[]|select(.protocol=="vless" or .protocol=="vmess" or .protocol=="trojan" or .protocol=="shadowsocks")'
+EP=$(jq -r "[$SRVFILTER]|.[0]|((.settings.vnext//.settings.servers)[0]|\"\(.address) \(.port)\")" "$CFG" 2>/dev/null | head -1)
 H=$(echo "$EP" | awk '{print $1}'); P=$(echo "$EP" | awk '{print $2}')
-SNI=$(jq -r '[.outbounds[]|select(.protocol=="vless")|.streamSettings.realitySettings.serverName//.streamSettings.tlsSettings.serverName]|map(select(.!=null))[0]//""' "$CFG" 2>/dev/null)
-echo "server endpoint : $H:$P"
-echo "reality SNI     : $SNI"
-printf "direct TCP      : "
-curl -s --connect-timeout 6 -o /dev/null -w 'time_connect=%{time_connect}s http_code=%{http_code}\n' "https://$H:$P/" 2>&1
+NET=$(jq -r "[$SRVFILTER]|.[0]|(.streamSettings.network//\"tcp\")" "$CFG" 2>/dev/null | head -1)
+SEC=$(jq -r "[$SRVFILTER]|.[0]|(.streamSettings.security//\"none\")" "$CFG" 2>/dev/null | head -1)
+FLOW=$(jq -r "[$SRVFILTER]|.[0]|((.settings.vnext[0].users[0].flow)//\"\")" "$CFG" 2>/dev/null | head -1)
+SNI=$(jq -r "[$SRVFILTER]|.[0]|(.streamSettings.realitySettings.serverName//.streamSettings.tlsSettings.serverName//\"\")" "$CFG" 2>/dev/null | head -1)
+echo "=== active server (from live config) ==="
+echo "  endpoint  : ${H:-?}:${P:-?}"
+echo "  transport : network=${NET:-?} security=${SEC:-?} flow=${FLOW:-<none>}"
+echo "  reality SNI: ${SNI:-<none>}"
+if [ -z "$H" ] || [ "$H" = "null" ]; then
+	echo "  !! could not read a server outbound from the config — cannot run probe B."
+fi
+printf "  direct TCP to server : "
+curl -s --connect-timeout 6 -o /dev/null -w 'connect=%{time_connect}s http=%{http_code}\n' "https://$H:$P/" 2>&1
 echo
 
-# ---- WAN interface + its MTU (context for the MSS story) -------------------
+# ---- WAN interface + MTU (context only) ------------------------------------
 echo "=== WAN / MTU context ==="
 WANDEV=$(ip route show default 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)
 echo "  default route dev : ${WANDEV:-?}"
-if [ -n "$WANDEV" ]; then
-	ip link show "$WANDEV" 2>/dev/null | grep -o 'mtu [0-9]*' | sed 's/^/  WAN /'
-fi
-# Best-effort PMTU-to-server probe via DF ping. ICMP is often filtered and
-# busybox ping may lack -M, so treat any result as a HINT, not proof. The
-# decisive signal is the clamped-xray test below.
-echo "  PMTU probe to $H (DF ping; best-effort — ICMP may be blocked):"
-if ping -c1 -W2 -s 1000 "$H" >/dev/null 2>&1; then
-	for PL in 1472 1412 1372 1352 1272 1232; do   # IP MTU = payload + 28
-		if ping -c1 -W2 -M do -s "$PL" "$H" >/dev/null 2>&1; then
-			echo "    ok  payload=$PL  (IP MTU $((PL+28)) passes unfragmented)"
-		else
-			echo "    --  payload=$PL  (IP MTU $((PL+28)) blocked/fragmented)"
-		fi
-	done
-else
-	echo "    (server does not answer ICMP, or -M unsupported — skipping; rely on the xray test)"
-fi
+[ -n "$WANDEV" ] && ip link show "$WANDEV" 2>/dev/null | grep -o 'mtu [0-9]*' | sed 's/^/  WAN /'
+printf "  router direct WAN IP: "
+curl -s -m 8 "https://api.ipify.org" 2>/dev/null; echo "  (this is what probe A should return)"
 echo
 
-# ---- independent TLS/DPI probe: real TLS ClientHello (SNI) to the server ----
-# A reality server proxies a genuine ClientHello for its SNI to the real dest,
-# so a CLEAN path completes the handshake. A reset/timeout here = DPI on that
-# SNI/dest. NOTE: session-15 evidence (PC/phone work on this LAN) already argues
-# against a DPI block; kept for completeness.
-echo "=== TLS/DPI probe (SNI $SNI -> $H:$P) ==="
-if [ -n "$SNI" ]; then
-	curl -sv -k -m 10 --connect-to "$SNI:443:$H:$P" "https://$SNI/" -o /dev/null 2>&1 \
-	  | grep -iE 'connected|SSL connection|TLS|handshake|reset|timed out|refused|certificate|subject:|issuer:|HTTP/' | sed 's/^/  /'
-else
-	echo "  (no SNI parsed — skipping)"
-fi
-echo
-
-# ---- build SOCKS-only debug configs (jq without test()/regex) --------------
-# $s = tag of the first real (server) outbound. Each config keeps ONLY that
-# outbound + a fresh SOCKS inbound, forces debug logging, and varies the
-# outbound sockopt so we can isolate the MSS/MTU effect.
-build() {   # build OUTFILE PORT SOCKOPT_JSON
-	jq --argjson so "$3" \
-	  '(.outbounds|map(select(.protocol=="vless" or .protocol=="vmess" or .protocol=="trojan" or .protocol=="shadowsocks"))[0].tag) as $s
-	   | {log:{loglevel:"debug"},
-	      inbounds:[{tag:"socks-in",listen:"127.0.0.1",port:'"$2"',protocol:"socks",settings:{auth:"noauth","udp":true}}],
-	      outbounds:[.outbounds[]
-	        | if (.protocol=="vless" or .protocol=="vmess" or .protocol=="trojan" or .protocol=="shadowsocks")
-	          then (.streamSettings.sockopt = ((.streamSettings.sockopt//{}) + $so)) else . end],
-	      routing:{rules:[{type:"field",inboundTag:["socks-in"],outboundTag:$s}]}}' \
-	  "$CFG" > "$1"
+# ---- config builders (throwaway; live config is never touched) -------------
+# Freedom control: 100% static, no jq — proves xray starts and egress is alive
+# regardless of the server. If THIS is empty, stop reading: xray isn't running.
+write_freedom() {   # write_freedom OUTFILE PORT
+	cat > "$1" <<EOF
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [ { "tag": "socks-in", "listen": "127.0.0.1", "port": $2, "protocol": "socks", "settings": { "auth": "noauth", "udp": true } } ],
+  "outbounds": [ { "tag": "direct", "protocol": "freedom" } ],
+  "routing": { "rules": [ { "type": "field", "inboundTag": [ "socks-in" ], "outboundTag": "direct" } ] }
 }
-build "$TMP/xray-plain.json"   10810 '{"mark":255}'
-build "$TMP/xray-mss1380.json" 10811 '{"mark":255,"tcpMaxSeg":1380}'
-build "$TMP/xray-mss1280.json" 10812 '{"mark":255,"tcpMaxSeg":1280}'
+EOF
+}
 
-# portable bounded run: background xray + a self-terminating watchdog (no
-# dependency on `timeout`, which busybox may not provide).
-run_test() {
+# Reality-via-SOCKS: keep the live server outbound VERBATIM (incl. sockopt mark
+# 255) and just point a fresh SOCKS inbound at it — this is the phone's path
+# (plain client, NO tproxy/dokodemo). If B passes but the router doesn't, the
+# capture is the culprit.
+write_reality() {   # write_reality OUTFILE PORT
+	jq "([$SRVFILTER][0]) as \$srv
+	   | { log: { loglevel: \"warning\" },
+	       inbounds: [ { tag: \"socks-in\", listen: \"127.0.0.1\", port: $2, protocol: \"socks\", settings: { auth: \"noauth\", udp: true } } ],
+	       outbounds: [ \$srv, { tag: \"direct\", protocol: \"freedom\" } ],
+	       routing: { rules: [ { type: \"field\", inboundTag: [ \"socks-in\" ], outboundTag: \$srv.tag } ] } }" \
+	  "$CFG" > "$1" 2>"$1.jqerr"
+}
+
+# run_variant NAME CONFIG PORT — prints EVERYTHING, hides NOTHING.
+run_variant() {
 	NAME="$1"; CONF="$2"; PORT="$3"
-	echo "----------- $NAME (socks 127.0.0.1:$PORT) -----------"
-	if [ ! -s "$CONF" ]; then echo "  !! config build failed ($CONF empty)"; return; fi
-	echo "  xray -test:"; "$XRAY" -test -config "$CONF" 2>&1 | tail -2 | sed 's/^/    /'
+	echo "----------------- $NAME (socks 127.0.0.1:$PORT) -----------------"
+
+	if [ ! -s "$CONF" ]; then
+		echo "  !! generated config is EMPTY — build failed. jq error:"
+		[ -f "$CONF.jqerr" ] && sed 's/^/     /' "$CONF.jqerr"
+		echo
+		return
+	fi
+	echo "  --- generated config ($CONF; id/password redacted) ---"
+	redact_secrets < "$CONF" | sed 's/^/    /'
+
+	echo "  --- xray -test ---"
+	"$XRAY" -test -config "$CONF" > "$TMP/$NAME.test" 2>&1
+	RC=$?
+	sed 's/^/    /' "$TMP/$NAME.test"
+	echo "    xray -test exit code: $RC"
+	if [ "$RC" != "0" ]; then
+		echo "  !! config REJECTED by xray -test (exit $RC) — not starting it."
+		echo
+		return
+	fi
+
+	echo "  --- launching xray run (auto-stops after the probes; ${WATCHDOG}s watchdog) ---"
 	"$XRAY" run -config "$CONF" > "$TMP/$NAME.log" 2>&1 &
 	XPID=$!
-	( sleep 14; kill "$XPID" 2>/dev/null ) &
+	( sleep "$WATCHDOG"; kill "$XPID" 2>/dev/null ) &
 	WPID=$!
 	sleep 2
-	echo "  listening on :$PORT ?"; { ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null; } | grep ":$PORT " | sed 's/^/    /'
-	printf "  SOCKS exit-IP (want the SERVER ip): "
-	curl -s -x socks5h://127.0.0.1:"$PORT" -m 10 https://api.ipify.org; echo
-	curl -s -x socks5h://127.0.0.1:"$PORT" -m 10 -o /dev/null -w '  gstatic=%{http_code}\n' https://www.gstatic.com/generate_204
-	# a slightly larger fetch shakes out MTU-only failures a tiny GET can hide
-	curl -s -x socks5h://127.0.0.1:"$PORT" -m 12 -o /dev/null -w '  1KB-fetch=%{http_code} size=%{size_download}\n' https://www.gstatic.com/generate_204
-	sleep 1
-	kill "$XPID" 2>/dev/null; kill "$WPID" 2>/dev/null; wait "$XPID" 2>/dev/null
-	echo "  --- last xray debug lines ---"
-	if [ -s "$TMP/$NAME.log" ]; then tail -8 "$TMP/$NAME.log" | sed 's/^/    /'; else echo "    (log empty)"; fi
+
+	if kill -0 "$XPID" 2>/dev/null; then
+		echo "    process: ALIVE (pid $XPID)"
+	else
+		echo "    process: EXITED EARLY — xray quit within 2s (see run log below)."
+	fi
+	printf "    listening on :%s ? " "$PORT"
+	{ ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null; } | grep ":$PORT " >/dev/null 2>&1 \
+		&& echo "yes" || echo "NO"
+
+	printf "    SOCKS exit IP : "
+	curl -s -x "socks5h://127.0.0.1:$PORT" -m 8 "https://api.ipify.org" 2>&1; echo
+	curl -s -x "socks5h://127.0.0.1:$PORT" -m 8 -o /dev/null \
+		-w '    generate_204  : http=%{http_code} time=%{time_total}s\n' \
+		"https://www.gstatic.com/generate_204" 2>&1
+	# a larger body flushes out MTU-only failures a tiny GET can mask
+	curl -s -x "socks5h://127.0.0.1:$PORT" -m 10 -o /dev/null \
+		-w '    1MB fetch     : http=%{http_code} bytes=%{size_download} time=%{time_total}s\n' \
+		"https://speed.cloudflare.com/__down?bytes=1048576" 2>&1
+
+	kill "$XPID" 2>/dev/null; wait "$XPID" 2>/dev/null; kill "$WPID" 2>/dev/null
+
+	echo "    --- full run log ($TMP/$NAME.log) ---"
+	if [ -s "$TMP/$NAME.log" ]; then
+		sed 's/^/      /' "$TMP/$NAME.log"
+	else
+		echo "      (run log EMPTY — xray printed nothing; combine with the process/listening lines above)"
+	fi
 	echo
 }
 
-echo "=================== decisive standalone test ==================="
-run_test xray-plain   "$TMP/xray-plain.json"   10810
-run_test xray-mss1380 "$TMP/xray-mss1380.json" 10811
-run_test xray-mss1280 "$TMP/xray-mss1280.json" 10812
+write_freedom "$TMP/diag-freedom.json" "$FPORT"
+write_reality "$TMP/diag-reality.json" "$RPORT"
 
-echo "=================== how to read it ============================"
-echo "  A clamped variant (mss1380/mss1280) carries traffic but xray-plain does NOT"
-echo "      -> MSS/MTU CONFIRMED. Set the MSS clamp on the Settings page:"
-echo "         keep 1380 (default) if mss1380 worked, else use the lowest that worked."
-echo "  ALL THREE carry the SERVER ip                 -> outbound is fine; bug is the TPROXY LAN capture"
-echo "  ALL THREE empty + log 'reset'                 -> DPI on the handshake (unlikely: PC/phone work here)"
-echo "  ALL THREE empty + log 'i/o timeout'/'dial'    -> path to server blocked mid-handshake"
-echo "  log 'REALITY'/'invalid'                       -> reality params (pbk/sid/sni) mismatch with server"
-echo "==============================================================="
+echo "=================== A) FREEDOM control ==================="
+echo "  PASS = returns the ROUTER's own WAN IP (proves xray runs + egress alive)."
+run_variant freedom "$TMP/diag-freedom.json" "$FPORT"
+
+echo "=================== B) REALITY via plain SOCKS ==================="
+echo "  PASS = returns the SERVER's IP (the phone's path — NO tproxy/dokodemo)."
+run_variant reality "$TMP/diag-reality.json" "$RPORT"
+
+echo "=================== how to read it (session-17 P0.2 fork) ==================="
+echo "  A empty                 -> xray isn't starting here / no direct internet. Read A's -test + log."
+echo "  A ok  + B = SERVER ip   -> reality works via plain SOCKS like the phone => the TPROXY/dokodemo"
+echo "                             capture is the bug. Set Settings -> Xray integration = \"proxy\"."
+echo "  A ok  + B empty         -> reality fails from this box even via SOCKS (server/transport/DPI on"
+echo "                             this node). Read B's log (reset / i/o timeout / REALITY invalid),"
+echo "                             then retry with a WS node instead of reality-vision."
+echo "==========================================================================="
