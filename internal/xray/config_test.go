@@ -92,6 +92,39 @@ func TestBuildConfigNoMSSClampByDefault(t *testing.T) {
 	}
 }
 
+// TestTProxyInboundRouteOnly guards the session-17 canon fix: the transparent
+// dokodemo-door inbound must sniff with routeOnly:true (like socks-in and
+// XKeen), so the sniffed domain only informs routing and the dial target stays
+// the original captured destination IP.
+func TestTProxyInboundRouteOnly(t *testing.T) {
+	opts := Defaults()
+	opts.EnableTProxy = true
+	cfg, err := BuildConfig([]model.Server{sampleReality("a", "1.1.1.1")}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tproxy *Inbound
+	for i := range cfg.Inbounds {
+		if cfg.Inbounds[i].Protocol == "dokodemo-door" {
+			tproxy = &cfg.Inbounds[i]
+		}
+	}
+	if tproxy == nil {
+		t.Fatal("expected a dokodemo-door (tproxy-in) inbound when EnableTProxy is set")
+	}
+	if tproxy.Sniffing == nil || !tproxy.Sniffing.Enabled {
+		t.Fatal("tproxy-in must sniff")
+	}
+	if !tproxy.Sniffing.RouteOnly {
+		t.Error("tproxy-in sniffing must set routeOnly:true (XKeen canon)")
+	}
+	// The marshalled config must actually carry the field.
+	data, _ := Marshal(cfg)
+	if !strings.Contains(string(data), "\"routeOnly\": true") {
+		t.Errorf("expected routeOnly:true in marshalled tproxy inbound:\n%s", data)
+	}
+}
+
 func TestBuildConfigBalancer(t *testing.T) {
 	servers := []model.Server{sampleReality("a", "1.1.1.1"), sampleReality("b", "2.2.2.2")}
 	opts := Defaults()

@@ -217,8 +217,14 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 		dd, _ := json.Marshal(map[string]any{"network": "tcp,udp", "followRedirect": true})
 		cfg.Inbounds = append(cfg.Inbounds, Inbound{
 			Tag: "tproxy-in", Port: opts.TProxyPort, Protocol: "dokodemo-door",
-			Settings:       dd,
-			Sniffing:       &Sniffing{Enabled: true, DestOverride: []string{"http", "tls", "quic"}},
+			Settings: dd,
+			// routeOnly:true matches the XKeen canon (and our own socks-in): the
+			// sniffed domain is used for routing decisions only — the connection
+			// still goes to the original captured destination IP, never a
+			// re-resolved address. Without it a transparent inbound can rewrite
+			// the dial target from the sniff, which is both unnecessary here (the
+			// real IP is already known) and a reliability hazard.
+			Sniffing:       &Sniffing{Enabled: true, DestOverride: []string{"http", "tls", "quic"}, RouteOnly: true},
 			StreamSettings: &StreamSettings{Sockopt: &Sockopt{TProxy: "tproxy"}},
 		})
 	}

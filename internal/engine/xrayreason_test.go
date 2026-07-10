@@ -3,18 +3,16 @@ package engine
 import (
 	"strings"
 	"testing"
-
-	"github.com/miroslavrov/keen-manager/internal/model"
 )
 
 func TestNormalizeXrayMSS(t *testing.T) {
 	cases := []struct {
 		in, want int
 	}{
-		{0, model.DefaultXrayMSS}, // auto → built-in default
-		{-1, 0},                   // disabled → no clamp emitted
-		{-999, 0},                 // any negative → disabled
-		{1360, 1360},              // explicit value passes through
+		{0, 0},       // default → OFF (no clamp; XKeen never clamps the MSS)
+		{-1, 0},      // negative → OFF
+		{-999, 0},    // any negative → OFF
+		{1360, 1360}, // explicit positive value passes through
 		{1452, 1452},
 	}
 	for _, c := range cases {

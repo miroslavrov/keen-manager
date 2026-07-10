@@ -511,22 +511,24 @@ func normalizeXrayLogLevel(v string) string {
 }
 
 // xrayMSSClamp resolves the effective MSS to set on Xray's server outbound from
-// the user setting: 0 → the built-in default, negative → disabled (0 = no
-// clamp), positive → that value. See model.Settings.XrayMSSClamp.
+// the user setting: 0 (or negative) → no clamp (default OFF), positive → that
+// value. See model.Settings.XrayMSSClamp.
 func (e *Engine) xrayMSSClamp() int {
 	return normalizeXrayMSS(e.store.Settings().XrayMSSClamp)
 }
 
 // normalizeXrayMSS maps the stored clamp setting to the value handed to Xray
-// (0 meaning "don't emit tcpMaxSeg"). Pure, so it is unit-tested directly.
+// (0 meaning "don't emit tcpMaxSeg"). The default is OFF: XKeen never clamps the
+// MSS and the dead-tunnel bug reproduced both before and after the session-15
+// clamp, so clamping is no longer applied automatically — only when the user
+// sets an explicit positive MSS on the Settings page (DefaultXrayMSS is the
+// suggested value). 0 (auto) and any negative both mean "no clamp". Pure, so it
+// is unit-tested directly.
 func normalizeXrayMSS(stored int) int {
-	if stored == 0 {
-		return model.DefaultXrayMSS
+	if stored > 0 {
+		return stored
 	}
-	if stored < 0 {
-		return 0 // explicitly disabled
-	}
-	return stored
+	return 0
 }
 
 // probeTarget is the connectivity check URL (failover probe target, or default).

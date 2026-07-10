@@ -287,22 +287,24 @@ type Settings struct {
 	XrayLogLevel string `json:"xray_log_level,omitempty"`
 
 	// XrayMSSClamp controls TCP_MAXSEG on Xray's server outbound (see
-	// xray.Sockopt.TCPMaxSeg — the fix for "handshake OK but no payload" on
-	// reduced-MTU/TSPU WANs, where the router's LOCAL egress isn't MSS-clamped
-	// the way FORWARDED LAN traffic is). Semantics:
-	//   0  → apply the built-in safe default (DefaultXrayMSS);
-	//   <0 → disabled (leave the MSS unclamped, Xray's old behaviour);
+	// xray.Sockopt.TCPMaxSeg). It was added in session 15 as a candidate fix for
+	// "handshake OK but no payload", but session 16's cross-check against the
+	// XKeen canon found XKeen never clamps the MSS and the dead-tunnel bug
+	// reproduced both before and after the clamp — so the clamp is now OFF by
+	// default and is a manual, per-ISP override only. Semantics:
+	//   0  → OFF (no clamp) — the default;
+	//   <0 → also OFF (kept so an install that explicitly stored -1 still works);
 	//   >0 → clamp to exactly this MSS (bytes).
-	// Defaulting to on is deliberate: a clamp is harmless on a healthy path and
-	// is the most likely fix on this class of router. Tunable on the Settings
-	// page; the diagnostic script measures the real value to use.
+	// Tunable on the Settings page (DefaultXrayMSS is the suggested value); the
+	// diagnostic script's PMTU probe measures the real value to use.
 	XrayMSSClamp int `json:"xray_mss_clamp,omitempty"`
 }
 
-// DefaultXrayMSS is the MSS keen-manager clamps Xray's server outbound to when
-// XrayMSSClamp is left at 0 (auto). 1380 (an ~1420-byte IP MTU) clears typical
-// PPPoE (1492) plus TSPU/tunnel overhead while costing negligible throughput on
-// a healthy path. Tune per-ISP from the diagnostic's PMTU probe.
+// DefaultXrayMSS is the MSS the Settings UI suggests when a user chooses to turn
+// the outbound clamp on. It is NOT applied automatically (the clamp defaults
+// off — see Settings.XrayMSSClamp). 1380 (an ~1420-byte IP MTU) clears typical
+// PPPoE (1492) plus TSPU/tunnel overhead while costing negligible throughput.
+// Tune per-ISP from the diagnostic's PMTU probe.
 const DefaultXrayMSS = 1380
 
 // State is the full persisted document.
