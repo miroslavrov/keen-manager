@@ -90,6 +90,7 @@ COMMANDS:
   sub add <name> <url>         add an Xray subscription
   sub refresh <id>             re-fetch a subscription
   sub best <id>                activate the fastest server in a subscription
+  sub enable|disable <id>      turn a subscription's whole server stream on/off
   nfqws status                 show nfqws2 service status
   nfqws start|stop|restart|reload|install
                                control the nfqws2 service
@@ -243,7 +244,7 @@ func cmdConnector(args []string) {
 
 func cmdSub(args []string) {
 	if len(args) == 0 {
-		fatal("usage: keen-manager sub list|add|refresh|best")
+		fatal("usage: keen-manager sub list|add|refresh|best|enable|disable")
 	}
 	eng := openEngine()
 	switch args[0] {
@@ -276,6 +277,16 @@ func cmdSub(args []string) {
 			fatal("%v", err)
 		}
 		fmt.Printf("activated %s\n", id)
+	case "enable", "disable":
+		if len(args) < 2 {
+			fatal("usage: keen-manager sub %s <id>", args[0])
+		}
+		on := args[0] == "enable"
+		v, err := eng.UpdateSubscription(args[1], map[string]any{"enabled": on})
+		if err != nil {
+			fatal("%v", err)
+		}
+		fmt.Printf("subscription %q stream %s\n", v.Name, map[bool]string{true: "enabled", false: "disabled"}[on])
 	default:
 		fatal("unknown sub subcommand %q", args[0])
 	}

@@ -64,6 +64,9 @@ func (e *Engine) activate(ctx context.Context, id string) error {
 	if !c.Enabled {
 		return fmt.Errorf("connection %q is disabled", c.Name)
 	}
+	if !subEnabled(st, c.SubscriptionID) {
+		return fmt.Errorf("connection %q belongs to a disabled subscription — enable the subscription first", c.Name)
+	}
 	prev := st.ActiveConnID
 	e.Logf("activating %s (previous active: %q)", c.Name, prev)
 
@@ -285,7 +288,7 @@ func (e *Engine) rollback(prev string, failed model.Connection) {
 	_ = e.bringDown(failed)
 
 	if prev != "" && prev != failed.ID {
-		if pc, ok := findConn(e.store.Get(), prev); ok && pc.Enabled {
+		if pc, ok := findConn(e.store.Get(), prev); ok && connEligible(e.store.Get(), pc) {
 			if err := e.bringUp(pc); err == nil {
 				_ = e.setActive(prev)
 				_ = e.applyRouting(pc)
@@ -597,7 +600,7 @@ func (e *Engine) probeConnection(st model.State, c model.Connection) model.Runti
 		LastCheck: time.Now(),
 		Active:    st.ActiveConnID == c.ID,
 	}
-	if !c.Enabled {
+	if !connEligible(st, c) {
 		rs.Status = model.StatusDisabled
 		return rs
 	}

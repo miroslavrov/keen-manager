@@ -197,6 +197,10 @@ type SubView struct {
 	UpdateIntervalHours int              `json:"update_interval_hours,omitempty"`
 	UserInfo            *SubUserInfoView `json:"userinfo,omitempty"`
 	AutoSelectBest      bool             `json:"auto_select_best"`
+	// Enabled is the subscription-stream on/off switch (middle egress toggle
+	// level). False = its servers are excluded from activation/select-best/
+	// failover/auto-select. See model.Subscription.Enabled.
+	Enabled bool `json:"enabled"`
 }
 
 // WanView is the router's upstream summary.

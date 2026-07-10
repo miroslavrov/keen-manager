@@ -165,8 +165,8 @@ func (e *Engine) resumeConnector() error {
 	if resume == "" {
 		return nil // nothing was active before; leave selection to the user/failover
 	}
-	if c, ok := findConn(e.store.Get(), resume); !ok || !c.Enabled {
-		return nil // remembered connection is gone/disabled — nothing to restore
+	if c, ok := findConn(e.store.Get(), resume); !ok || !connEligible(e.store.Get(), c) {
+		return nil // remembered connection is gone/disabled (or its subscription is) — nothing to restore
 	}
 	if err := e.Activate(resume); err != nil {
 		e.Logf("connector: could not restore %s: %v", resume, err)
@@ -303,7 +303,7 @@ func (e *Engine) activeHealthy(st model.State) bool {
 		return false
 	}
 	c, ok := findConn(st, st.ActiveConnID)
-	if !ok || !c.Enabled {
+	if !ok || !connEligible(st, c) {
 		return false
 	}
 	return e.verifyOnce(c)
@@ -425,8 +425,9 @@ func (e *Engine) nodeReachable(connID string) bool {
 	if connID == DirectNode {
 		return true
 	}
-	c, ok := findConn(e.store.Get(), connID)
-	if !ok || !c.Enabled {
+	st := e.store.Get()
+	c, ok := findConn(st, connID)
+	if !ok || !connEligible(st, c) {
 		return false
 	}
 	host, port := endpointHostPort(c)

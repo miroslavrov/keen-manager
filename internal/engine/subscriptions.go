@@ -36,6 +36,7 @@ func (e *Engine) subView(st model.State, s model.Subscription) SubView {
 		LastUpdate:          isoPtr(s.LastUpdate),
 		UpdateIntervalHours: s.UpdateInterval,
 		AutoSelectBest:      s.AutoSelectBest,
+		Enabled:             s.Enabled,
 	}
 	if s.UserInfo != nil {
 		v.UserInfo = &SubUserInfoView{
@@ -93,6 +94,7 @@ func (e *Engine) CreateSubscription(name, url string) (SubView, error) {
 		UpdateInterval: res.UpdateIntervalHours,
 		UserInfo:       res.UserInfo,
 		AutoSelectBest: true,
+		Enabled:        true,
 	}
 	now := time.Now()
 	sub.LastUpdate = &now
@@ -325,13 +327,34 @@ func (e *Engine) DeleteSubscription(id string) error {
 }
 
 // UpdateSubscription applies a partial update to a subscription's editable
-// fields — name, auto_select_best and update_interval_hours — and returns the
-// refreshed view. Server membership is only ever changed by RefreshSubscription,
-// so this is safe to call without touching the active tunnel.
+// fields — name, auto_select_best, update_interval_hours and the enabled
+// (stream on/off) switch — and returns the refreshed view. Server membership is
+// only ever changed by RefreshSubscription. Turning the stream OFF while one of
+// its servers is the active tunnel tears that tunnel down and sends the LAN to
+// the direct path (mirroring per-connection disable and the master connector),
+// so a disabled subscription can never keep routing.
 func (e *Engine) UpdateSubscription(id string, fields map[string]any) (SubView, error) {
-	if _, ok := findSub(e.store.Get(), id); !ok {
+	st := e.store.Get()
+	sub, ok := findSub(st, id)
+	if !ok {
 		return SubView{}, fmt.Errorf("subscription %s not found", id)
 	}
+
+	// Detect a stream on->off transition, and whether the active tunnel belongs
+	// to this subscription — if so we tear it down (outside the Mutate, since it
+	// touches the device) after persisting the flag.
+	disabling := false
+	if v, ok := fields["enabled"].(bool); ok && sub.Enabled && !v {
+		disabling = true
+	}
+	var toDown *model.Connection
+	if disabling && st.ActiveConnID != "" {
+		if c, ok := findConn(st, st.ActiveConnID); ok && c.SubscriptionID == id {
+			cc := c
+			toDown = &cc
+		}
+	}
+
 	if err := e.store.Mutate(func(s *model.State) error {
 		for i := range s.Subscriptions {
 			if s.Subscriptions[i].ID != id {
@@ -345,6 +368,9 @@ func (e *Engine) UpdateSubscription(id string, fields map[string]any) (SubView, 
 			if v, ok := fields["auto_select_best"].(bool); ok {
 				s.Subscriptions[i].AutoSelectBest = v
 			}
+			if v, ok := fields["enabled"].(bool); ok {
+				s.Subscriptions[i].Enabled = v
+			}
 			// JSON numbers decode to float64.
 			if v, ok := fields["update_interval_hours"].(float64); ok {
 				if h := int(v); h >= 0 {
@@ -352,13 +378,29 @@ func (e *Engine) UpdateSubscription(id string, fields map[string]any) (SubView, 
 				}
 			}
 		}
+		if toDown != nil {
+			s.ActiveConnID = ""
+		}
 		return nil
 	}); err != nil {
 		return SubView{}, err
 	}
+
+	if toDown != nil {
+		e.revertRouting(*toDown)
+		_ = e.bringDown(*toDown)
+		e.setRuntime(toDown.ID, model.RuntimeStatus{
+			ConnID: toDown.ID, Status: model.StatusDown, Active: false,
+			LastCheck: time.Now(), Message: "subscription disabled",
+		})
+		e.foResetFail()
+		e.foResetBackoff()
+		e.Logf("subscription %q disabled — active server torn down, LAN on the direct path", sub.Name)
+	}
+
 	e.Logf("subscription updated: %s", id)
 	e.publishState()
-	st := e.store.Get()
+	st = e.store.Get()
 	sv, _ := findSub(st, id)
 	return e.subView(st, sv), nil
 }
@@ -408,6 +450,9 @@ func (e *Engine) SelectBest(id string) (string, error) {
 	sub, ok := findSub(st, id)
 	if !ok {
 		return "", fmt.Errorf("subscription %s not found", id)
+	}
+	if !sub.Enabled {
+		return "", fmt.Errorf("subscription %q is disabled — enable it first", sub.Name)
 	}
 	var members []model.Connection
 	for _, c := range st.Connections {
@@ -555,12 +600,17 @@ func (e *Engine) rankReachable(members []model.Connection) []string {
 	return rankByLatency(results)
 }
 
-// probeSubscription probes all of a subscription's servers (best-effort).
+// probeSubscription probes all of a subscription's servers (best-effort). A
+// disabled subscription is skipped — its servers are ineligible, and probeAll
+// already marks them disabled.
 func (e *Engine) probeSubscription(id string) {
 	if e.runner.DryRun {
 		return
 	}
 	st := e.store.Get()
+	if sub, ok := findSub(st, id); ok && !sub.Enabled {
+		return
+	}
 	var members []model.Connection
 	for _, c := range st.Connections {
 		if c.SubscriptionID == id && c.Enabled {
@@ -596,6 +646,31 @@ func findSub(st model.State, id string) (model.Subscription, bool) {
 		}
 	}
 	return model.Subscription{}, false
+}
+
+// subEnabled reports whether the subscription stream with the given id is on. A
+// blank id (a manually-added connection with no subscription) is always on; an
+// unknown id is treated as on (defensive — a dangling reference must not silently
+// disable a connection).
+func subEnabled(st model.State, subID string) bool {
+	if subID == "" {
+		return true
+	}
+	for _, s := range st.Subscriptions {
+		if s.ID == subID {
+			return s.Enabled
+		}
+	}
+	return true
+}
+
+// connEligible reports whether a connection may be brought up or selected by the
+// engine: it must be individually enabled AND (when it came from a subscription)
+// its subscription stream must be enabled. This is the single predicate the
+// candidate pools, background loops and activation share, so the three toggle
+// levels — master connector / subscription stream / per-connection — compose.
+func connEligible(st model.State, c model.Connection) bool {
+	return c.Enabled && subEnabled(st, c.SubscriptionID)
 }
 
 func isoPtr(t *time.Time) string {

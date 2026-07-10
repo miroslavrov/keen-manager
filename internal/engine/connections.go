@@ -40,7 +40,10 @@ func (e *Engine) connView(st model.State, c model.Connection) ConnView {
 		Location:       locationOf(c),
 	}
 
-	if !c.Enabled {
+	// Individually disabled, or the whole subscription stream is off — either way
+	// the server is out of the pool, so show it disabled (the UI can still tell
+	// the two apart via the per-connection switch vs the subscription toggle).
+	if !connEligible(st, c) {
 		v.Status = string(model.StatusDisabled)
 		return v
 	}

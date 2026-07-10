@@ -82,7 +82,8 @@ func (e *Engine) probeAll() {
 	sem := make(chan struct{}, 10)
 	var wg sync.WaitGroup
 	for _, c := range st.Connections {
-		if !c.Enabled {
+		if !connEligible(st, c) {
+			// Individually disabled, or its subscription stream is off.
 			e.setRuntime(c.ID, model.RuntimeStatus{ConnID: c.ID, Status: model.StatusDisabled, LastCheck: time.Now()})
 			continue
 		}
@@ -113,8 +114,8 @@ func (e *Engine) autoSelectTick() {
 		return
 	}
 	sub, ok := findSub(st, active.SubscriptionID)
-	if !ok || !sub.AutoSelectBest {
-		return
+	if !ok || !sub.AutoSelectBest || !sub.Enabled {
+		return // no auto-select from a disabled subscription stream
 	}
 
 	var members []model.Connection

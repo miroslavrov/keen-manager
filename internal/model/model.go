@@ -150,6 +150,16 @@ type Subscription struct {
 	UpdateInterval int          `json:"update_interval_hours,omitempty"`
 	UserInfo       *SubUserInfo `json:"userinfo,omitempty"`
 	AutoSelectBest bool         `json:"auto_select_best"`
+	// Enabled is the subscription-stream on/off switch — the middle of the three
+	// egress toggle levels the user asked to untangle: (1) the master connector
+	// (State.TunnelPaused) is the whole VPN egress, (2) THIS flag turns a single
+	// subscription's whole fleet on/off as a routing source, (3) Connection.Enabled
+	// toggles one server. A disabled subscription's servers are ineligible for
+	// activation, select-best, failover and auto-select (see engine.connEligible).
+	// It is written "positive" (true = on) like Connection.Enabled; existing
+	// pre-schema-2 state has no such field, so config.migrate enables every
+	// subscription on upgrade to avoid silently disabling a user's fleet.
+	Enabled bool `json:"enabled"`
 	// ServerIDs references the Connection IDs created from this subscription.
 	ServerIDs []string `json:"server_ids,omitempty"`
 }

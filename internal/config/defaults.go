@@ -30,9 +30,10 @@ func DefaultState() model.State {
 
 // migrate upgrades an older State in place.
 func migrate(s *model.State) {
-	if s.Version == 0 {
-		s.Version = SchemaVersion
-	}
+	// Capture the on-disk schema version BEFORE we touch it, so version-gated
+	// migrations below see the real "from" (a v0/v1 state, or a fresh 0).
+	from := s.Version
+
 	if s.Settings.Port == 0 {
 		s.Settings.Port = 47115
 	}
@@ -51,4 +52,16 @@ func migrate(s *model.State) {
 	if s.Subscriptions == nil {
 		s.Subscriptions = []model.Subscription{}
 	}
+
+	// Schema v2: Subscription.Enabled was added. Pre-v2 state has no such field,
+	// so it unmarshals to false — but every existing subscription was implicitly
+	// active. Enable them all on upgrade so a migration never silently kills a
+	// user's fleet. New subscriptions are created enabled (see CreateSubscription).
+	if from < 2 {
+		for i := range s.Subscriptions {
+			s.Subscriptions[i].Enabled = true
+		}
+	}
+
+	s.Version = SchemaVersion
 }

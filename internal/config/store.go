@@ -14,7 +14,8 @@ import (
 )
 
 // SchemaVersion is bumped when the persisted format changes.
-const SchemaVersion = 1
+//   v2: model.Subscription.Enabled introduced (default true for existing subs).
+const SchemaVersion = 2
 
 // Store is a thread-safe wrapper around the persisted State.
 type Store struct {
