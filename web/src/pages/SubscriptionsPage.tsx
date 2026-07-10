@@ -7,6 +7,7 @@ import {
   Loader2,
   MapPin,
   Plus,
+  Power,
   RefreshCw,
   Server as ServerIcon,
   Trash2,
@@ -269,8 +270,40 @@ function SubscriptionCard({
     },
   })
 
+  // Subscription-stream on/off — the middle egress level. Turning it off can
+  // tear down the active tunnel server-side (LAN → direct), so also refresh
+  // connections and state, not just the subscription list.
+  const enabledMutation = useMutation({
+    mutationFn: (next: boolean) =>
+      api.updateSubscription(sub.id, { enabled: next }),
+    onMutate: (next: boolean) => {
+      const prev = queryClient.getQueryData<Sub[]>(['subscriptions'])
+      queryClient.setQueryData<Sub[] | undefined>(['subscriptions'], (cur) =>
+        cur?.map((s) => (s.id === sub.id ? { ...s, enabled: next } : s)),
+      )
+      return { prev }
+    },
+    onError: (_err, _next, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['subscriptions'], ctx.prev)
+      toast({ variant: 'error', title: t('subscriptions.streamErrorTitle') })
+    },
+    onSuccess: (updated) => {
+      toast({
+        variant: 'success',
+        title: updated.enabled
+          ? t('subscriptions.streamEnabledTitle')
+          : t('subscriptions.streamDisabledTitle'),
+      })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
+      queryClient.invalidateQueries({ queryKey: ['connections'] })
+      queryClient.invalidateQueries({ queryKey: ['state'] })
+    },
+  })
+
   return (
-    <Card>
+    <Card className={cn(!sub.enabled && 'border-border/50')}>
       <CardContent className="p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0 space-y-1">
@@ -279,9 +312,16 @@ function SubscriptionCard({
                 <Globe className="h-4 w-4" />
               </div>
               <div className="min-w-0">
-                <h3 className="truncate text-sm font-semibold text-foreground">
-                  {sub.name}
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="truncate text-sm font-semibold text-foreground">
+                    {sub.name}
+                  </h3>
+                  {!sub.enabled ? (
+                    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {t('subscriptions.pausedBadge')}
+                    </span>
+                  ) : null}
+                </div>
                 <p className="truncate font-mono text-xs text-muted-foreground">
                   {sub.host}
                 </p>
@@ -290,10 +330,35 @@ function SubscriptionCard({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="mr-1 flex items-center gap-2 rounded-md border border-border/70 px-2.5 py-1">
+            <div
+              className={cn(
+                'mr-1 flex items-center gap-2 rounded-md border px-2.5 py-1',
+                sub.enabled
+                  ? 'border-primary/40 bg-primary/5'
+                  : 'border-border/70',
+              )}
+              title={t('subscriptions.streamTitle')}
+            >
+              <Power
+                className={cn(
+                  'h-3.5 w-3.5',
+                  sub.enabled ? 'text-primary' : 'text-muted-foreground',
+                )}
+              />
+              <span className="text-xs font-medium text-foreground">
+                {t('subscriptions.stream')}
+              </span>
+              <Switch
+                checked={sub.enabled}
+                disabled={enabledMutation.isPending}
+                onCheckedChange={(v) => enabledMutation.mutate(v)}
+                aria-label={t('subscriptions.streamAria')}
+              />
+            </div>
+            <div className="flex items-center gap-2 rounded-md border border-border/70 px-2.5 py-1">
               <Switch
                 checked={sub.auto_select_best}
-                disabled={autoMutation.isPending}
+                disabled={autoMutation.isPending || !sub.enabled}
                 onCheckedChange={(v) => autoMutation.mutate(v)}
                 aria-label={t('subscriptions.autoSelectAria')}
               />
@@ -305,7 +370,12 @@ function SubscriptionCard({
               variant="outline"
               size="sm"
               onClick={onSelectBest}
-              disabled={selecting}
+              disabled={selecting || !sub.enabled}
+              title={
+                !sub.enabled
+                  ? t('subscriptions.selectBestDisabledHint')
+                  : undefined
+              }
               className="gap-1.5"
             >
               {selecting ? (
@@ -340,7 +410,12 @@ function SubscriptionCard({
         </div>
 
         {/* Meta grid */}
-        <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+        <div
+          className={cn(
+            'mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4',
+            !sub.enabled && 'opacity-60',
+          )}
+        >
           <Meta label={t('subscriptions.metaServers')} value={String(sub.server_count)} />
           <Meta label={t('subscriptions.metaProtocol')} value={sub.protocol} mono />
           <Meta
@@ -354,7 +429,7 @@ function SubscriptionCard({
 
         {/* Data usage */}
         {usage ? (
-          <div className="mt-4 space-y-1.5">
+          <div className={cn('mt-4 space-y-1.5', !sub.enabled && 'opacity-60')}>
             <div className="flex items-center justify-between text-xs">
               <span className="text-muted-foreground">
                 {t('subscriptions.dataUsage')}

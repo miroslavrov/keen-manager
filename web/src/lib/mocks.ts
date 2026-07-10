@@ -270,6 +270,7 @@ export const mockSubscriptions: Sub[] = [
       expire: iso(-60 * 60 * 24 * 47),
     },
     auto_select_best: true,
+    enabled: true,
   },
   {
     id: 'sub-skyroute',
@@ -286,6 +287,7 @@ export const mockSubscriptions: Sub[] = [
       expire: iso(-60 * 60 * 24 * 6),
     },
     auto_select_best: false,
+    enabled: false,
   },
 ]
 

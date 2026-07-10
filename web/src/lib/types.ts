@@ -76,6 +76,11 @@ export interface Sub {
   update_interval_hours?: number
   userinfo?: SubUserInfo
   auto_select_best: boolean
+  /** Subscription-stream on/off — the middle of the three egress toggle levels
+   * (master connector → subscription stream → per-connection Enabled). False =
+   * this subscription's servers are excluded from activation, select-best,
+   * failover and auto-select. */
+  enabled: boolean
 }
 
 export type NfqwsMode = 'MODE_AUTO' | 'MODE_LIST' | 'MODE_ALL'
@@ -345,9 +350,10 @@ export interface Settings {
    * "debug" (surfaces the tunnel's own failure reason on activation errors) |
    * "info" | "error" | "none". */
   xray_log_level: string
-  /** Outbound MSS clamp (Xray sockopt tcpMaxSeg). 0 = auto (built-in safe
-   * default), negative = disabled, positive = explicit MSS. The fix for
-   * "handshake OK but no payload" on reduced-MTU / TSPU WANs. */
+  /** Outbound MSS clamp (Xray sockopt tcpMaxSeg). 0 or negative = off (no
+   * clamp) — the default; positive = clamp to exactly that MSS. A manual
+   * per-ISP override for "handshake OK but no payload" on reduced-MTU / TSPU
+   * WANs; XKeen never clamps, so keen-manager leaves it off unless set. */
   xray_mss_clamp: number
   platform: Platform
 }

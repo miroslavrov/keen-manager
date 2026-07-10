@@ -244,12 +244,18 @@ export const api = {
         protocol: 'mixed',
         server_count: 0,
         auto_select_best: false,
+        enabled: true,
       }),
     ),
 
   updateSubscription: (
     id: string,
-    body: Partial<{ name: string; auto_select_best: boolean; update_interval_hours: number }>,
+    body: Partial<{
+      name: string
+      enabled: boolean
+      auto_select_best: boolean
+      update_interval_hours: number
+    }>,
   ) =>
     withOk<Sub>(
       () => request(`/subscriptions/${id}`, { method: 'PUT', body }),
