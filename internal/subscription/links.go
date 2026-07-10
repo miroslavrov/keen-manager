@@ -50,8 +50,8 @@ func parseVLESS(raw string) (*model.Server, error) {
 		Network:     def(q.Get("type"), "tcp"),
 		SNI:         q.Get("sni"),
 		Fingerprint: q.Get("fp"),
-		PublicKey:   q.Get("pbk"),
-		ShortID:     q.Get("sid"),
+		PublicKey:   canonRealityKey(q.Get("pbk")),
+		ShortID:     strings.TrimSpace(q.Get("sid")),
 		SpiderX:     q.Get("spx"),
 		Host:        q.Get("host"),
 		Raw:         raw,
@@ -308,6 +308,24 @@ func toInt(v any) int {
 		return i
 	}
 	return 0
+}
+
+// canonRealityKey canonicalises a REALITY public key (pbk) to the unpadded
+// base64url form Xray-core requires. A "+" in a standard-base64 key is decoded
+// to a space by net/url when it comes from a share-link query, so we restore it
+// before decoding; anything that is not a 32-byte key is left as-is. Keeping the
+// stored key clean means both the generated config and the UI see the canonical
+// value. See xray.normalizeRealityKey for the config-time counterpart.
+func canonRealityKey(k string) string {
+	k = strings.TrimSpace(k)
+	if k == "" {
+		return k
+	}
+	k = strings.ReplaceAll(k, " ", "+")
+	if b, err := b64lenient(k); err == nil && len(b) == 32 {
+		return base64.RawURLEncoding.EncodeToString(b)
+	}
+	return k
 }
 
 // b64lenient decodes standard/url-safe base64 with or without padding.

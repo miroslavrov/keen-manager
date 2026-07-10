@@ -3,8 +3,10 @@
 package xray
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/miroslavrov/keen-manager/internal/model"
 )
@@ -83,14 +85,15 @@ func OutboundFor(s model.Server, tag string) (*Outbound, error) {
 	// security block
 	switch s.Security {
 	case "reality":
-		if s.PublicKey == "" {
+		pbk := normalizeRealityKey(s.PublicKey)
+		if pbk == "" {
 			return nil, fmt.Errorf("%s: reality requires publicKey (pbk)", s.Name)
 		}
 		ss.RealitySettings = &RealitySettings{
 			ServerName:  s.SNI,
 			Fingerprint: def(s.Fingerprint, "chrome"),
-			PublicKey:   s.PublicKey,
-			ShortID:     s.ShortID,
+			PublicKey:   pbk,
+			ShortID:     strings.TrimSpace(s.ShortID),
 			SpiderX:     def(s.SpiderX, "/"),
 		}
 	case "tls":
@@ -187,4 +190,38 @@ func def(v, d string) string {
 		return d
 	}
 	return v
+}
+
+// normalizeRealityKey canonicalises a REALITY public key to the ONLY shape
+// Xray-core accepts: the unpadded base64url (base64.RawURLEncoding) form of the
+// 32-byte X25519 key. Modern Xray (build ≥ v25) validates this strictly and
+// rejects anything else with `Failed to build REALITY config > invalid
+// "password"` — which surfaces to the user as the opaque "xray config invalid".
+//
+// Subscriptions deliver the key (`pbk`) in inconsistent shapes:
+//   - standard base64 with "+"/"/" instead of "-"/"_"
+//   - padded ("=") variants
+//   - and, because net/url decodes a query-string "+" as a space, a standard
+//     key arrives from a share link with spaces where every "+" used to be.
+//
+// We recover all of these: no base64 alphabet contains a space, so any space
+// must be a mangled "+"; restore it, decode whatever flavour it is, and re-emit
+// the RawURLEncoding form. A value that is not a decodable 32-byte key is passed
+// through untouched so Xray reports its own precise error instead of us masking
+// a genuinely broken credential.
+func normalizeRealityKey(k string) string {
+	k = strings.TrimSpace(k)
+	if k == "" {
+		return k
+	}
+	k = strings.ReplaceAll(k, " ", "+")
+	for _, enc := range []*base64.Encoding{
+		base64.RawURLEncoding, base64.RawStdEncoding,
+		base64.URLEncoding, base64.StdEncoding,
+	} {
+		if b, err := enc.DecodeString(k); err == nil && len(b) == 32 {
+			return base64.RawURLEncoding.EncodeToString(b)
+		}
+	}
+	return k
 }

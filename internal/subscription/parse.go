@@ -111,11 +111,11 @@ func parseClash(body string) ([]model.Server, error) {
 func clashProxyToServer(p map[string]any) *model.Server {
 	typ := ystr(p["type"])
 	s := &model.Server{
-		Address:  ystr(p["server"]),
-		Port:     yint(p["port"]),
-		Name:     ystr(p["name"]),
-		Network:  def(ystr(p["network"]), "tcp"),
-		SNI:      firstNonEmpty(ystr(p["servername"]), ystr(p["sni"])),
+		Address:     ystr(p["server"]),
+		Port:        yint(p["port"]),
+		Name:        ystr(p["name"]),
+		Network:     def(ystr(p["network"]), "tcp"),
+		SNI:         firstNonEmpty(ystr(p["servername"]), ystr(p["sni"])),
 		Fingerprint: ystr(p["client-fingerprint"]),
 	}
 	s.Location = stripFlags(s.Name)
@@ -127,8 +127,8 @@ func clashProxyToServer(p map[string]any) *model.Server {
 	// reality-opts
 	if ro, ok := p["reality-opts"].(map[string]any); ok {
 		s.Security = "reality"
-		s.PublicKey = ystr(ro["public-key"])
-		s.ShortID = ystr(ro["short-id"])
+		s.PublicKey = canonRealityKey(ystr(ro["public-key"]))
+		s.ShortID = strings.TrimSpace(ystr(ro["short-id"]))
 		if s.SpiderX == "" {
 			s.SpiderX = "/"
 		}

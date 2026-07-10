@@ -82,3 +82,36 @@ func TestWriteConfigAtomicRename(t *testing.T) {
 		t.Errorf("expected a -format json validate command, got %v", *cmds)
 	}
 }
+
+// TestDistillXrayTestError guards the session-18 fix that made "xray config
+// invalid" legible: a failed `xray -test` prints a version banner + an
+// "[Info] Reading config" line before the real cause, and nests causes as
+// "a > b > c". We must strip the noise and surface the innermost cause.
+func TestDistillXrayTestError(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{
+			name: "reality-invalid-password",
+			in: "Xray 26.3.27 (Xray, Penetrates Everything.) d2758a0 (go1.26.1 linux/amd64)\n" +
+				"A unified platform for anti-censorship.\n" +
+				"2026/07/11 00:39:01.596149 [Info] infra/conf/serial: Reading config: &{Name:/x.json Format:json}\n" +
+				"Failed to start: main: failed to load config files: [/x.json] > infra/conf: failed to build outbound config with tag srv > infra/conf: Failed to build REALITY config. > infra/conf: invalid \"password\": z9foAieCPO2/M0Q=",
+			want: "infra/conf: invalid \"password\": z9foAieCPO2/M0Q=",
+		},
+		{
+			name: "single-line",
+			in:   "infra/conf: invalid port",
+			want: "infra/conf: invalid port",
+		},
+		{name: "empty", in: "", want: ""},
+		{name: "banner-only", in: "Xray 26.3.27 (Xray, Penetrates Everything.) abc\nA unified platform for anti-censorship.", want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := distillXrayTestError(tc.in); got != tc.want {
+				t.Errorf("distillXrayTestError()\n got=%q\nwant=%q", got, tc.want)
+			}
+		})
+	}
+}

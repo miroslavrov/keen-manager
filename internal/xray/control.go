@@ -103,9 +103,53 @@ func (c *Controller) Validate(configPath string) error {
 	}
 	res := c.Runner.Run(c.bin(), "-test", "-config", configPath, "-format", "json")
 	if res.Err != nil {
-		return fmt.Errorf("xray config invalid: %s", firstNonEmptyStr(res.Stderr, res.Stdout))
+		// Xray writes a failed `-test` to stdout (it dies before the app logger,
+		// and before honouring the config's own log.error file), so prefer stdout
+		// and distil the wall of banner+trace down to the innermost cause. Fall
+		// back to the exec error itself (e.g. a timeout that produced no output)
+		// so the reason is never blank.
+		detail := distillXrayTestError(firstNonEmptyStr(res.Stdout, res.Stderr))
+		if detail == "" {
+			detail = res.Err.Error()
+		}
+		return fmt.Errorf("xray config invalid: %s", detail)
 	}
 	return nil
+}
+
+// distillXrayTestError reduces the multi-line output of a failed `xray -test`
+// to one salient line. Xray prints a version banner and an "[Info] Reading
+// config" line before the actual error, and formats nested causes as
+// "a > b > c"; we drop the noise and keep the innermost cause (c), e.g.
+// `infra/conf: invalid "password": <key>`. Pure, so it is unit-tested.
+func distillXrayTestError(out string) string {
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return ""
+	}
+	cand := ""
+	for _, ln := range strings.Split(out, "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		low := strings.ToLower(ln)
+		if strings.Contains(low, "penetrates everything") ||
+			strings.Contains(low, "anti-censorship") ||
+			strings.Contains(low, "reading config") ||
+			strings.Contains(low, "[info]") ||
+			strings.Contains(low, "[debug]") {
+			continue
+		}
+		cand = ln // keep the last meaningful line
+	}
+	if cand == "" {
+		return ""
+	}
+	if i := strings.LastIndex(cand, " > "); i >= 0 {
+		cand = strings.TrimSpace(cand[i+3:])
+	}
+	return cand
 }
 
 // WriteConfig writes the config to disk (creating a timestamped backup of any

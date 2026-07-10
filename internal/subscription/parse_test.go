@@ -113,14 +113,38 @@ func TestParseSSSIP002(t *testing.T) {
 
 func TestDetect(t *testing.T) {
 	cases := map[string]Format{
-		"proxies:\n  - name: a":              FormatClashYAML,
-		"vless://x@a:1":                      FormatPlainList,
-		`{"version":1,"servers":[]}`:         FormatSIP008,
+		"proxies:\n  - name: a":      FormatClashYAML,
+		"vless://x@a:1":              FormatPlainList,
+		`{"version":1,"servers":[]}`: FormatSIP008,
 		base64.StdEncoding.EncodeToString([]byte("vless://x@a:1")): FormatBase64List,
 	}
 	for in, want := range cases {
 		if got := Detect(in); got != want {
 			t.Errorf("Detect(%.20q) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+// TestParseVLESSRealityCanonicalKey guards the session-18 fix: a subscription
+// that delivers the reality pbk in standard base64 (with "+"/"/" or "=" padding,
+// or — because net/url turns a query "+" into a space — with spaces) must be
+// canonicalised to the unpadded base64url form Xray-core requires, so the
+// generated config is not rejected as invalid "password".
+func TestParseVLESSRealityCanonicalKey(t *testing.T) {
+	// 32-byte key whose standard base64 contains "+" and "/".
+	const wantRawURL = "z9foAieCPO2_F5ZYNutMqR-VvB15lXVNJsM93g0_M0Q"
+	// The panel emits standard base64 (a literal "+"); net/url decodes that "+"
+	// to a space when the query is parsed — exactly the corruption the fix
+	// recovers from before re-encoding to base64url.
+	const stdKey = "z9foAieCPO2/F5ZYNutMqR+VvB15lXVNJsM93g0/M0Q"
+	link := "vless://839d4028-2984-4e66-8e62-f4c127b52f49@1.2.3.4:443?security=reality&type=tcp&flow=xtls-rprx-vision&sni=m.com&pbk=" +
+		stdKey + "&sid=07ddc43269d197c0#Test"
+
+	s, err := ParseLink(link)
+	if err != nil {
+		t.Fatalf("ParseLink: %v", err)
+	}
+	if s.PublicKey != wantRawURL {
+		t.Errorf("pbk = %q, want canonical %q", s.PublicKey, wantRawURL)
 	}
 }
