@@ -45,6 +45,8 @@ interface SettingsForm {
   kill_switch_default: boolean
   auto_select_interval_min: number
   xray_integration: string
+  xray_log_level: string
+  xray_mss_clamp: number
 }
 
 type SettingsPayload = Partial<Settings> & {
@@ -84,6 +86,8 @@ export function SettingsPage() {
         kill_switch_default: settings.kill_switch_default,
         auto_select_interval_min: 15,
         xray_integration: settings.xray_integration || 'auto',
+        xray_log_level: settings.xray_log_level || 'warning',
+        xray_mss_clamp: settings.xray_mss_clamp ?? 0,
       })
     }
   }, [settings, form])
@@ -108,6 +112,8 @@ export function SettingsPage() {
         kill_switch_default: form.kill_switch_default,
         auto_select_interval_min: form.auto_select_interval_min,
         xray_integration: form.xray_integration,
+        xray_log_level: form.xray_log_level,
+        xray_mss_clamp: form.xray_mss_clamp,
       }
       if (password.trim()) body.password = password
       return api.saveSettings(body as Partial<Settings>)
@@ -290,6 +296,69 @@ export function SettingsPage() {
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   {t('settings.xrayIntegrationHint')}
+                </p>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <Label htmlFor="xray-log-level">
+                  {t('settings.xrayLogLevel')}
+                </Label>
+                <Select
+                  value={form.xray_log_level}
+                  onValueChange={(v) => update('xray_log_level', v)}
+                >
+                  <SelectTrigger id="xray-log-level" className="max-w-[280px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="warning">
+                      {t('settings.xrayLogWarning')}
+                    </SelectItem>
+                    <SelectItem value="debug">
+                      {t('settings.xrayLogDebug')}
+                    </SelectItem>
+                    <SelectItem value="info">
+                      {t('settings.xrayLogInfo')}
+                    </SelectItem>
+                    <SelectItem value="error">
+                      {t('settings.xrayLogError')}
+                    </SelectItem>
+                    <SelectItem value="none">
+                      {t('settings.xrayLogNone')}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {t('settings.xrayLogLevelHint')}
+                </p>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <Label htmlFor="xray-mss">{t('settings.xrayMssClamp')}</Label>
+                <Input
+                  id="xray-mss"
+                  type="number"
+                  value={form.xray_mss_clamp}
+                  onChange={(e) =>
+                    update('xray_mss_clamp', Number(e.target.value))
+                  }
+                  className="max-w-[160px] tabular-nums"
+                />
+                <p className="text-xs font-medium text-foreground">
+                  {form.xray_mss_clamp === 0
+                    ? t('settings.xrayMssClampAutoNote')
+                    : form.xray_mss_clamp < 0
+                      ? t('settings.xrayMssClampDisabledNote')
+                      : t('settings.xrayMssClampSetNote', {
+                          mss: form.xray_mss_clamp,
+                        })}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t('settings.xrayMssClampHint')}
                 </p>
               </div>
             </CardContent>

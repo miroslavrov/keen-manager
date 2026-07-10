@@ -194,6 +194,7 @@ export const mockState: AppState = {
     uptime_seconds: 412_338,
   },
   kill_switch: false,
+  connector_enabled: true,
   hook_installed: true,
 }
 
@@ -563,6 +564,8 @@ export const mockSettings: Settings = {
   kill_switch_default: false,
   auto_select_interval_min: 30,
   xray_integration: 'auto',
+  xray_log_level: 'warning',
+  xray_mss_clamp: 0,
   platform: {
     arch: 'mipsel',
     os_version: 'KeeneticOS 4.2.3',

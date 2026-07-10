@@ -490,6 +490,13 @@ export const api = {
       { ok: true },
     ),
 
+  // ---- master connector switch (whole VPN egress on/off) ----
+  setConnector: (enabled: boolean) =>
+    withOk<Ok>(
+      () => request('/connector', { method: 'POST', body: { enabled } }),
+      { ok: true },
+    ),
+
   // ---- logs ----
   logs: (service: LogService, lines: number) =>
     withMock<LogResponse>(

@@ -11,6 +11,7 @@ import {
   Globe,
   Loader2,
   MapPin,
+  Power,
   Radio,
   RefreshCw,
   Shield,
@@ -141,6 +142,31 @@ export function DashboardPage() {
     },
   })
 
+  const connectorMutation = useMutation({
+    mutationFn: (next: boolean) => api.setConnector(next),
+    onSuccess: (_data, next) => {
+      queryClient.setQueryData<AppState | undefined>(['state'], (prev) =>
+        prev ? { ...prev, connector_enabled: next } : prev,
+      )
+      queryClient.invalidateQueries({ queryKey: ['state'] })
+      toast({
+        variant: next ? 'success' : 'warning',
+        title: next
+          ? t('dashboard.connectorOnTitle')
+          : t('dashboard.connectorOffTitle'),
+        description: next
+          ? t('dashboard.connectorOnDesc')
+          : t('dashboard.connectorOffDesc'),
+      })
+    },
+    onError: (err: Error) =>
+      toast({
+        variant: 'error',
+        title: t('dashboard.connectorError'),
+        description: err.message,
+      }),
+  })
+
   const nfqwsMutation = useMutation({
     mutationFn: () => api.nfqwsAction('restart'),
     onSuccess: () => {
@@ -225,6 +251,9 @@ export function DashboardPage() {
             <WanCard state={state} rate={wanRate} />
             <ActiveHeroCard
               active={active}
+              connectorEnabled={state?.connector_enabled ?? true}
+              onToggleConnector={(next) => connectorMutation.mutate(next)}
+              connectorPending={connectorMutation.isPending}
               killSwitch={state?.kill_switch ?? false}
               onToggleKill={(next) => killMutation.mutate(next)}
               killPending={killMutation.isPending}
@@ -476,11 +505,17 @@ function CapBadge({ label, ok }: { label: string; ok: boolean }) {
 
 function ActiveHeroCard({
   active,
+  connectorEnabled,
+  onToggleConnector,
+  connectorPending,
   killSwitch,
   onToggleKill,
   killPending,
 }: {
   active?: Conn
+  connectorEnabled: boolean
+  onToggleConnector: (next: boolean) => void
+  connectorPending: boolean
   killSwitch: boolean
   onToggleKill: (next: boolean) => void
   killPending: boolean
@@ -492,7 +527,9 @@ function ActiveHeroCard({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 space-y-1">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {t('dashboard.activeRoute')}
+              {connectorEnabled
+                ? t('dashboard.activeRoute')
+                : t('dashboard.connectorPausedLabel')}
             </p>
             {active ? (
               <div className="flex items-center gap-2.5">
@@ -538,39 +575,81 @@ function ActiveHeroCard({
           </div>
         ) : null}
 
-        <div className="mt-auto flex items-center justify-between rounded-md border border-border/70 bg-card px-3 py-2.5">
-          <div className="flex items-center gap-2.5">
-            <div
-              className={cn(
-                'flex h-8 w-8 items-center justify-center rounded-md',
-                killSwitch
-                  ? 'bg-warning/15 text-warning'
-                  : 'bg-muted text-muted-foreground',
-              )}
-            >
-              {killSwitch ? (
-                <ShieldAlert className="h-4 w-4" />
-              ) : (
-                <Shield className="h-4 w-4" />
-              )}
+        <div className="mt-auto space-y-2.5">
+          {/* Master connector switch — one on/off for the whole VPN egress,
+              sitting above the kill-switch as the primary control. */}
+          <div
+            className={cn(
+              'flex items-center justify-between rounded-md border px-3 py-2.5 transition-colors',
+              connectorEnabled
+                ? 'border-primary/30 bg-primary/5'
+                : 'border-warning/40 bg-warning/5',
+            )}
+          >
+            <div className="flex items-center gap-2.5">
+              <div
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-md',
+                  connectorEnabled
+                    ? 'bg-primary/15 text-primary'
+                    : 'bg-warning/15 text-warning',
+                )}
+              >
+                <Power className="h-4 w-4" />
+              </div>
+              <div className="leading-tight">
+                <p className="text-sm font-medium text-foreground">
+                  {t('dashboard.connector')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {connectorEnabled
+                    ? t('dashboard.connectorOnState')
+                    : t('dashboard.connectorOffState')}
+                </p>
+              </div>
             </div>
-            <div className="leading-tight">
-              <p className="text-sm font-medium text-foreground">
-                {t('dashboard.killSwitch')}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {killSwitch
-                  ? t('dashboard.killBlocking')
-                  : t('dashboard.killAllowFallback')}
-              </p>
-            </div>
+            <Switch
+              checked={connectorEnabled}
+              disabled={connectorPending}
+              onCheckedChange={onToggleConnector}
+              aria-label={t('dashboard.toggleConnector')}
+            />
           </div>
-          <Switch
-            checked={killSwitch}
-            disabled={killPending}
-            onCheckedChange={onToggleKill}
-            aria-label={t('dashboard.toggleKillSwitch')}
-          />
+
+          <div className="flex items-center justify-between rounded-md border border-border/70 bg-card px-3 py-2.5">
+            <div className="flex items-center gap-2.5">
+              <div
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-md',
+                  killSwitch
+                    ? 'bg-warning/15 text-warning'
+                    : 'bg-muted text-muted-foreground',
+                )}
+              >
+                {killSwitch ? (
+                  <ShieldAlert className="h-4 w-4" />
+                ) : (
+                  <Shield className="h-4 w-4" />
+                )}
+              </div>
+              <div className="leading-tight">
+                <p className="text-sm font-medium text-foreground">
+                  {t('dashboard.killSwitch')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {killSwitch
+                    ? t('dashboard.killBlocking')
+                    : t('dashboard.killAllowFallback')}
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={killSwitch}
+              disabled={killPending}
+              onCheckedChange={onToggleKill}
+              aria-label={t('dashboard.toggleKillSwitch')}
+            />
+          </div>
         </div>
       </CardContent>
     </Card>

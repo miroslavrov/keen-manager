@@ -303,6 +303,9 @@ export interface AppState {
   failover: Failover
   wan: Wan
   kill_switch: boolean
+  /** Master VPN-egress switch. False = the LAN is intentionally on the direct
+   * path and the loops won't bring a tunnel up on their own. */
+  connector_enabled: boolean
   /** Whether the ndm netfilter.d hook that reapplies routing rules is present. */
   hook_installed?: boolean
 }
@@ -338,6 +341,14 @@ export interface Settings {
    * "auto" (default) | "proxy" (one visible KeeneticOS Proxy connection) |
    * "tproxy" (legacy transparent-proxy capture). */
   xray_integration: string
+  /** Xray loglevel written into the generated config. "warning" (default) |
+   * "debug" (surfaces the tunnel's own failure reason on activation errors) |
+   * "info" | "error" | "none". */
+  xray_log_level: string
+  /** Outbound MSS clamp (Xray sockopt tcpMaxSeg). 0 = auto (built-in safe
+   * default), negative = disabled, positive = explicit MSS. The fix for
+   * "handshake OK but no payload" on reduced-MTU / TSPU WANs. */
+  xray_mss_clamp: number
   platform: Platform
 }
 
