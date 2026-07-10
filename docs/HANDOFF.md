@@ -1,6 +1,6 @@
 # Handoff — keen-manager (для следующего агента)
 
-Обновлено: 2026-07-10 (**15-я сессия**). Репозиторий: `github.com/miroslavrov/keen-manager`,
+Обновлено: 2026-07-10 (**16-я сессия**). Репозиторий: `github.com/miroslavrov/keen-manager`,
 ветка `main`. Коммиты от лица **miroslavrov** (git-credentials уже в песочнице; токен
 пользователь передаёт отдельно, в репозиторий НЕ коммитить). Пользователь на **KeeneticOS**
 (прошивка отдаёт release-строку `"5.01.C.0.0-1"`, это 5.1.0), arch **arm64**, тестирует
@@ -11,7 +11,31 @@
 
 ---
 
-## 0. Сессии 5–15 — что сделано и что осталось
+## 0. Сессии 5–16 — что сделано и что осталось
+
+### 16-я сессия (СВЕРКА С КАНОНОМ XKeen; кода НЕ меняли, HEAD остался `993477a`) — P0-гипотеза ПЕРЕСТАВЛЕНА: конфиг ПРАВИЛЬНЫЙ, расходимся в СПОСОБЕ завода трафика в Xray (TPROXY/dokodemo-door у нас vs socks/tun-клиент на рабочих ПК/телефоне)
+**Триггер:** юзер попросил свериться со статьёй Habr `ru/articles/990322` («Xray on Keenetic / Xkeen») и другими источниками — «правильно ли мы вообще делаем». Сверили: `Skrill0/XKeen` + активный форк **`jameszeroX/XKeen`** (README + FAQ `jameszero.net/faq-xkeen.htm` + `_xkeen/.../04_register_init.sh`), `xtls.github.io` (tproxy-доки), XTLS/Xray-core (vision/reality, issues). **Кода не трогали — только research + working-doc.**
+
+**ВЕРДИКТ СВЕРКИ — наш конфиг КОРРЕКТЕН, баг НЕ в форме конфига:**
+- Наш outbound `vless+reality+flow xtls-rprx-vision` (`internal/xray/outbound.go`) совпадает с каноном XKeen/XTLS **дословно**: `encryption:"none"`, `flow` внутри `users[]`, `network:"tcp"` (vision требует raw TCP), `security:"reality"`, все reality-поля (serverName/fingerprint/publicKey/shortId/spiderX), `sockopt.mark:255` = ровно антилуп-марка XKeen.
+- Capture РАБОТАЕТ: device-лог 14-й с тегом `[tproxy-in -> srv-conn]` = соединения принимаются и роутятся в серверный outbound. Значит форма конфига — не причина.
+
+**КОРНЕВАЯ АСИММЕТРИЯ (главный след P0):** на роутере активен режим **TPROXY + dokodemo-door** (inbound-тег `tproxy-in`). ПК/телефон юзера, где ТЕ ЖЕ конфиги РАБОТАЮТ, используют обычный клиент (socks/tun-inbound). Автор XKeen прямо: **«в 99% случаев нет смысла возиться с tproxy/dokodemo-door или маркировкой трафика»**, рекомендует встроенный **Proxy-client Keenetic** (роутер → локальный socks-inbound Xray). У нас режим `proxy` уже реализован (`engine.xrayMode`/`buildProxyConnConfig`), но авто-детект выбрал `tproxy` (или proxy упал в fallback — `isProxyClientDown`). => единственный участок, отличающий роутер от рабочего телефона, — прозрачный capture, а не сам туннель. Возможный механизм (НЕ подтверждён, и неважен для A/B): vision + dokodemo-door задействуют splice-путь Xray, PR #5737 (fix splice-handoff vision) влит ~за 5 дней до сборки 26.3.27 + open-issue #5966 про хрупкость vision-паддинга.
+
+**РАСХОЖДЕНИЯ ОТ КАНОНА (нашёл при сверке):**
+1. **MSS-clamp дефолт-ON (`model.DefaultXrayMSS=1380`)** — XKeen **НИГДЕ** не клампит MSS (проверено по всему `04_register_init.sh`). Самодельная догадка 15-й; баг был ДО клампа (14-я — тот же провал без клампа). Кандидат №1 убрать из дефолта.
+2. **dokodemo-door inbound без `routeOnly:true`** (`internal/xray/config.go:221`) — XKeen ставит `routeOnly:true` на прозрачных inbound'ах; у нашего `socks-in` (config.go:209) он есть, у `tproxy-in` — нет.
+3. TPROXY-правила (`internal/route/route.go`) без XKeen-овских `-m socket --transparent -j MARK` (established) и `-m conntrack --ctstate DNAT/INVALID -j RETURN`, и без `--on-ip 127.0.0.1`. Capture работает, но это дыры в надёжности.
+
+**⚠️ diag v3 БЫЛА НЕИНФОРМАТИВНОЙ (НЕ считать её доказательством MSS/DPI):** в выводе юзера НЕТ строки версии xray, после `xray -test:` пусто, `listening` пусто, все три `(log empty)` → standalone-xray в том прогоне **вообще не стартовал/не логировался** (вероятно `run_test` не поднял xray, а `| tail -2` это спрятало). v3 просто ничего не измерила.
+
+**ПРИОРИТЕТЫ СЛЕДУЮЩЕМУ АГЕНТУ:**
+1. **P0.1 — diag v4 (линчпин, собрать ПЕРВЫМ):** переписать `scripts/diag-tunnel.sh` так, чтобы он ОДНОЗНАЧНО отвечал: (а) контрольный **freedom-outbound** socks-xray — доказывает, что xray на устройстве вообще запускается и egress жив; (б) **socks-inbound + reality** проба — путь как на телефоне, БЕЗ tproxy/dokodemo; (в) **гарантированный вывод даже при падении xray** — НЕ прятать stdout/stderr через `| tail`, печатать код возврата `xray -test`, echo сгенерённого конфига, печатать почему процесс вышел. Запуск одной строкой `curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/<commit>/scripts/diag-tunnel.sh | sh`.
+2. **P0.2 — развязка по итогам v4:** socks-xray НЕСЁТ трафик → баг в TPROXY/dokodemo-capture → перевести инсталл на **proxy-client** (`Settings.XrayIntegration="proxy"`, как на телефоне). DNS-нюанс (кейс denisitpro): явные DNS (1.1.1.1) + интерфейс НЕ раздаёт DNS роутера (`HardenProxyInterface` уже чистит `name-servers` — проверить на устройстве). socks-xray ПУСТ, а freedom НЕСЁТ → reality с роутера не идёт даже через socks (глубже — сверить транспорт узла blanc; но противоречит «работает на телефоне»).
+3. **P0.3 — код-гигиена по канону:** убрать MSS-clamp из дефолта (`normalizeXrayMSS`/`DefaultXrayMSS` — дефолт «выкл», тумблер оставить); добавить `routeOnly:true` в `tproxy-in`. Сборка `go build/vet/test` + arm64-кросс.
+4. **P1 — UI-путаница тумблеров (прямой запрос юзера):** у `model.Subscription` НЕТ поля `Enabled` — юзер тумблит отдельные сервера (`Connection.Enabled` на Connections) и `auto_select_best`, но НЕ саму подписку как поток. Добавить вкл/выкл ПОТОКА подписки и развести в UI три уровня: (1) master-connector = общий выход VPN (session 15, `State.TunnelPaused`, тумблер на Dashboard), (2) подписка вкл/выкл (новое), (3) per-server `Enabled`. Тумблер nfqws/bypass уже есть во вкладке.
+
+**Источники (для перепроверки):** Habr `ru/articles/990322`; `github.com/Skrill0/XKeen`; `github.com/jameszeroX/XKeen` (README, FAQ, `04_register_init.sh`, шаблоны inbounds/outbounds); `xtls.github.io/.../tproxy_ipv4_and_ipv6`; XTLS/Xray-core PR #5737, issue #5966; кейс «туннель встал, сайты стоят из-за DNS» — denisitpro.wordpress.com.
 
 ### 15-я сессия (КОД + РЕЛИЗ) — P0-фикс мёртвого туннеля ОТГРУЖЕН (outbound MSS-clamp, дефолт ON) + P1-инструментовка (свой лог Xray → причина в ошибке) + master-connector (бэк+веб) ; выпущен `v0.1.0-rc.3`
 **ПОВОРОТНЫЙ ФАКТ ОТ ЮЗЕРА (снимает всю 14-ю DPI-гипотезу):** те же самые
