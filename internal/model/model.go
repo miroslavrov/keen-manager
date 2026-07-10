@@ -278,7 +278,32 @@ type Settings struct {
 	//               router UI, in-Xray split routing).
 	// See docs/XRAY-PROXY-PLAN.md.
 	XrayIntegration string `json:"xray_integration,omitempty"`
+
+	// XrayLogLevel is the loglevel keen-manager writes into the generated Xray
+	// config ("warning" default; "debug"/"info"/"error"/"none" also valid). A
+	// debug level makes Xray record the real handshake/dial detail in its own
+	// error log, which the activation path tails to explain a failed bring-up.
+	// Empty means the built-in default (warning).
+	XrayLogLevel string `json:"xray_log_level,omitempty"`
+
+	// XrayMSSClamp controls TCP_MAXSEG on Xray's server outbound (see
+	// xray.Sockopt.TCPMaxSeg — the fix for "handshake OK but no payload" on
+	// reduced-MTU/TSPU WANs, where the router's LOCAL egress isn't MSS-clamped
+	// the way FORWARDED LAN traffic is). Semantics:
+	//   0  → apply the built-in safe default (DefaultXrayMSS);
+	//   <0 → disabled (leave the MSS unclamped, Xray's old behaviour);
+	//   >0 → clamp to exactly this MSS (bytes).
+	// Defaulting to on is deliberate: a clamp is harmless on a healthy path and
+	// is the most likely fix on this class of router. Tunable on the Settings
+	// page; the diagnostic script measures the real value to use.
+	XrayMSSClamp int `json:"xray_mss_clamp,omitempty"`
 }
+
+// DefaultXrayMSS is the MSS keen-manager clamps Xray's server outbound to when
+// XrayMSSClamp is left at 0 (auto). 1380 (an ~1420-byte IP MTU) clears typical
+// PPPoE (1492) plus TSPU/tunnel overhead while costing negligible throughput on
+// a healthy path. Tune per-ISP from the diagnostic's PMTU probe.
+const DefaultXrayMSS = 1380
 
 // State is the full persisted document.
 type State struct {
@@ -291,6 +316,21 @@ type State struct {
 	ActiveConnID  string         `json:"active_conn_id"`
 	KillSwitch    bool           `json:"kill_switch"`
 	Version       int            `json:"schema_version"`
+
+	// TunnelPaused is the master "connector" switch for the VPN egress (Xray/AWG),
+	// the single on/off the user asked for alongside the per-route (subnet)
+	// toggles: when true the active tunnel is torn down and the LAN egresses
+	// direct, and the background loops (failover, auto-select, nfqws guard,
+	// boot reconcile) will NOT bring a tunnel up on their own. The zero value is
+	// false (enabled), so existing installs need no migration. Any interactive
+	// activation (activate a connection, select-best) clears it — turning the
+	// connector explicitly back on. Distinct from per-connection Enabled (which
+	// removes a server from the pool) and from KillSwitch (leak prevention).
+	TunnelPaused bool `json:"tunnel_paused,omitempty"`
+	// PausedConnID remembers which connection was active when the connector was
+	// switched off, so switching it back on restores that exact tunnel. Cleared
+	// once consumed.
+	PausedConnID string `json:"paused_conn_id,omitempty"`
 
 	// NativeIfaces maps a connection ID to the KeeneticOS native Wireguard
 	// interface name (e.g. "Wireguard1") created for it via RCI import. It is

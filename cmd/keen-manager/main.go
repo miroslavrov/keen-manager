@@ -45,6 +45,8 @@ func main() {
 		cmdRoute(rest)
 	case "failover", "fo":
 		cmdFailover(rest)
+	case "connector", "vpn":
+		cmdConnector(rest)
 	case "passwd", "password":
 		cmdPasswd(rest)
 	case "auth":
@@ -102,6 +104,9 @@ COMMANDS:
   passwd <new-password>        set the web UI password and enable auth
   auth disable                 turn off the web UI login (recover from a lockout)
   auth status                  show whether the web UI login is enabled
+  connector show               print the master connector (VPN egress) state
+  connector on|off             master switch: turn the whole VPN egress on/off
+                               (off = LAN goes direct; per-route toggles are separate)
   failover show                print the failover configuration (JSON)
   failover on|off              enable / disable the failover engine
   failover chain <id...|direct>
@@ -204,6 +209,35 @@ func cmdConn(args []string) {
 		fmt.Printf("conn %s: %s ok\n", args[1], args[0])
 	default:
 		fatal("unknown conn subcommand %q", args[0])
+	}
+}
+
+// cmdConnector is the CLI face of the master VPN-egress switch (State DTO
+// connector_enabled). It mirrors the web toggle: off tears the active tunnel
+// down so the LAN egresses direct and the loops stand down; on restores it.
+func cmdConnector(args []string) {
+	eng := openEngine()
+	if len(args) == 0 {
+		fatal("usage: keen-manager connector show|on|off")
+	}
+	switch args[0] {
+	case "show", "status":
+		printJSON(map[string]any{
+			"connector_enabled": eng.ConnectorEnabled(),
+			"active":            eng.State().ActiveConnectionID,
+		})
+	case "on", "enable":
+		if err := eng.SetConnectorEnabled(true); err != nil {
+			fatal("%v", err)
+		}
+		fmt.Println("connector enabled (VPN egress on)")
+	case "off", "disable":
+		if err := eng.SetConnectorEnabled(false); err != nil {
+			fatal("%v", err)
+		}
+		fmt.Println("connector disabled (LAN on the direct path)")
+	default:
+		fatal("unknown connector subcommand %q", args[0])
 	}
 }
 

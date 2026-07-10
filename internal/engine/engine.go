@@ -274,6 +274,7 @@ func (e *Engine) State() StateView {
 		Failover:           fo,
 		Wan:                e.detectWAN(),
 		KillSwitch:         st.KillSwitch,
+		ConnectorEnabled:   !st.TunnelPaused,
 		HookInstalled:      e.HookInstalled(),
 	}
 }

@@ -29,8 +29,26 @@ import (
 
 // Activate makes a connection the active default path, with automatic rollback.
 // It runs unbounded — the caller waits — so it is the right entry point for
-// user-initiated activations (HTTP/CLI).
-func (e *Engine) Activate(id string) error { return e.activate(e.baseCtx(), id) }
+// user-initiated activations (HTTP/CLI). Any explicit activation also clears the
+// master connector pause: asking for a specific tunnel means "connector on".
+func (e *Engine) Activate(id string) error {
+	e.clearConnectorPause()
+	return e.activate(e.baseCtx(), id)
+}
+
+// clearConnectorPause turns the master connector back on. No-op when not paused.
+// Called from every interactive activation so a user action implicitly resumes
+// the connector; the background loops never call this (they respect the pause).
+func (e *Engine) clearConnectorPause() {
+	if !e.store.Get().TunnelPaused {
+		return
+	}
+	_ = e.store.Mutate(func(s *model.State) error {
+		s.TunnelPaused = false
+		s.PausedConnID = ""
+		return nil
+	})
+}
 
 // activate is Activate with an explicit context. Background callers on the
 // shared health/failover goroutine use activateWithin to pass a per-attempt
@@ -66,6 +84,15 @@ func (e *Engine) activate(ctx context.Context, id string) error {
 		if ok, detail := e.verifyActive(ctx, c); !ok {
 			target := e.probeTarget()
 			reason := firstNonEmpty(detail, "no response before the rollback timeout")
+			// For Xray, distil the tunnel's OWN error log so the message explains
+			// WHY it failed (dial reset, i/o timeout, REALITY mismatch) instead of
+			// only that it "did not carry traffic". Needs the debug loglevel to be
+			// most useful, but even at warning it often catches the failing line.
+			if c.Type == model.ConnXray {
+				if xr := e.xrayFailureReason(); xr != "" {
+					reason = reason + "; xray log: " + xr
+				}
+			}
 			e.Logf("post-activate probe failed for %s (target=%s: %s) — rolling back to %q", c.Name, target, reason, prev)
 			e.rollback(prev, c)
 			return fmt.Errorf("activation verification failed for %q: the tunnel did not carry traffic to %s (%s); rolled back — check the server is reachable and not DPI-blocked, or set a different probe target on the Failover page", c.Name, target, reason)
@@ -176,6 +203,9 @@ func (e *Engine) bringUpCtx(ctx context.Context, c model.Connection) error {
 		if err != nil {
 			return fmt.Errorf("xray-core not available: %w", err)
 		}
+		// Start this attempt's error log fresh so a later failure reason reflects
+		// only this bring-up (not a stale line from a previous server/attempt).
+		e.xray.TruncateErrorLog()
 		// Proxy-connection mode: apply the SOCKS-only config and register the
 		// single managed ProxyN exit point (falls back to TPROXY on rejection).
 		if e.xrayProxyMode() {
@@ -377,6 +407,12 @@ func (e *Engine) buildActiveXray(connID string, server model.Server, excludeRout
 	opts := xray.Defaults()
 	opts.SocksPort = xraySocksPort
 	opts.EnableBalancer = false
+	// Direct Xray's own error log to a known file and honour the debug toggle, so
+	// a failed activation can report the tunnel's real reason (see verifyActive).
+	opts.LogError = e.xray.ErrorLogPath()
+	opts.LogLevel = e.xrayLogLevel()
+	// Clamp the outbound MSS (fix for router-local egress on a reduced-MTU WAN).
+	opts.TCPMaxSeg = e.xrayMSSClamp()
 	if pt := e.probeTarget(); pt != "" {
 		opts.ProbeURL = pt
 		opts.PingDestination = pt
@@ -406,6 +442,91 @@ func (e *Engine) xrayRouteMembership(connID, excludeID string) (domains, subnets
 		subnets = append(subnets, r.Subnets...)
 	}
 	return dedupeLower(domains), dedupe(subnets)
+}
+
+// xrayFailureReason distils Xray's own error log into one short, salient line
+// explaining a failed bring-up (a dial reset, an i/o timeout, a REALITY
+// mismatch), so the activation error is actionable rather than only "did not
+// carry traffic". Returns "" when the log is empty. It prefers the most recent
+// line matching a known failure signature and otherwise uses the last line.
+func (e *Engine) xrayFailureReason() string {
+	return distillXrayFailure(e.xray.LogTail(20))
+}
+
+// xrayFailureSignatures are substrings (lower-cased) that mark an Xray log line
+// as an actionable failure reason worth surfacing in an activation error.
+var xrayFailureSignatures = []string{
+	"reality", "invalid", "rejected", "reset", "timeout", "timed out",
+	"refused", "unreachable", "no route", "dial ", "handshake",
+	"certificate", "context deadline", "eof", "failed to", "unable to",
+}
+
+// distillXrayFailure picks the most recent salient line from an Xray log tail
+// and condenses it. Pure, so it is unit-tested without a device/log file.
+func distillXrayFailure(tail string) string {
+	if strings.TrimSpace(tail) == "" {
+		return ""
+	}
+	lines := strings.Split(tail, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		low := strings.ToLower(lines[i])
+		for _, s := range xrayFailureSignatures {
+			if strings.Contains(low, s) {
+				return condenseLogLine(lines[i])
+			}
+		}
+	}
+	return condenseLogLine(lines[len(lines)-1])
+}
+
+// condenseLogLine strips an Xray "2006/01/02 15:04:05" timestamp prefix and caps
+// the length so a log line embeds cleanly in an error message.
+func condenseLogLine(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 19 && s[4] == '/' && s[7] == '/' && s[10] == ' ' && s[13] == ':' {
+		s = strings.TrimSpace(s[19:])
+	}
+	const maxLen = 240
+	if len(s) > maxLen {
+		s = s[:maxLen] + "…"
+	}
+	return s
+}
+
+// xrayLogLevel resolves the Xray loglevel written into the generated config
+// from the user setting, defaulting to "warning" and rejecting unknown values.
+func (e *Engine) xrayLogLevel() string {
+	return normalizeXrayLogLevel(e.store.Settings().XrayLogLevel)
+}
+
+// normalizeXrayLogLevel validates the stored Xray loglevel. Empty or unknown
+// values fall back to "warning". Pure, so it is unit-tested directly.
+func normalizeXrayLogLevel(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "debug", "info", "warning", "error", "none":
+		return strings.ToLower(strings.TrimSpace(v))
+	default:
+		return "warning"
+	}
+}
+
+// xrayMSSClamp resolves the effective MSS to set on Xray's server outbound from
+// the user setting: 0 → the built-in default, negative → disabled (0 = no
+// clamp), positive → that value. See model.Settings.XrayMSSClamp.
+func (e *Engine) xrayMSSClamp() int {
+	return normalizeXrayMSS(e.store.Settings().XrayMSSClamp)
+}
+
+// normalizeXrayMSS maps the stored clamp setting to the value handed to Xray
+// (0 meaning "don't emit tcpMaxSeg"). Pure, so it is unit-tested directly.
+func normalizeXrayMSS(stored int) int {
+	if stored == 0 {
+		return model.DefaultXrayMSS
+	}
+	if stored < 0 {
+		return 0 // explicitly disabled
+	}
+	return stored
 }
 
 // probeTarget is the connectivity check URL (failover probe target, or default).

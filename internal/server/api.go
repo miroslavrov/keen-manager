@@ -85,6 +85,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Kill switch.
 	mux.HandleFunc("POST /api/killswitch", s.requireAuth(s.handleKillSwitch))
 
+	// Master connector switch (whole VPN egress on/off).
+	mux.HandleFunc("POST /api/connector", s.requireAuth(s.handleConnector))
+
 	// Logs.
 	mux.HandleFunc("GET /api/logs", s.requireAuth(s.handleLogs))
 
@@ -564,6 +567,24 @@ func (s *Server) handleKillSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.eng.SetKillSwitch(body.Enabled); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeOK(w)
+}
+
+// handleConnector is the master on/off for the whole VPN egress (Xray/AWG).
+// Off tears down the active tunnel so the LAN egresses direct and the loops
+// stand down; on restores the connection that was active before.
+func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := s.eng.SetConnectorEnabled(body.Enabled); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}

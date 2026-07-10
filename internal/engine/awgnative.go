@@ -184,6 +184,10 @@ func (e *Engine) reconcile() {
 		return
 	}
 	st := e.store.Get()
+	if st.TunnelPaused {
+		e.Logf("reconcile: connector is paused — leaving the LAN on the direct path")
+		return
+	}
 	id := st.ActiveConnID
 	if id == "" {
 		return

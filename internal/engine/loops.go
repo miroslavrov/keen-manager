@@ -105,6 +105,9 @@ func (e *Engine) autoSelectTick() {
 		return
 	}
 	st := e.store.Get()
+	if st.TunnelPaused {
+		return // connector master switch off — don't migrate/activate anything
+	}
 	active, ok := findConn(st, st.ActiveConnID)
 	if !ok || active.SubscriptionID == "" {
 		return

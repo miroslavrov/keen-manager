@@ -57,8 +57,18 @@ type GRPCSettings struct {
 }
 
 type Sockopt struct {
-	Mark    int    `json:"mark,omitempty"`
-	TProxy  string `json:"tproxy,omitempty"`
+	Mark   int    `json:"mark,omitempty"`
+	TProxy string `json:"tproxy,omitempty"`
+	// TCPMaxSeg sets TCP_MAXSEG (the JSON key is Xray's `tcpMaxSeg`) on the
+	// outbound socket, clamping the MSS the router advertises to the server. It
+	// is the fix for the "reality handshake establishes but no payload flows"
+	// class of bug on routers: Xray's egress to the server is a router-LOCAL
+	// socket (OUTPUT chain), which — unlike LAN traffic FORWARDED through the
+	// router — is not MSS-clamped-to-PMTU by KeeneticOS, so on a reduced-MTU or
+	// TSPU-throttled WAN the small handshake packets get through while full-size
+	// data segments blackhole. Clamping the MSS here makes the server send
+	// segments that fit the real path MTU. 0 omits the field (no clamp).
+	TCPMaxSeg int `json:"tcpMaxSeg,omitempty"`
 }
 
 // OutboundFor converts a Server into an Xray outbound with the given tag.

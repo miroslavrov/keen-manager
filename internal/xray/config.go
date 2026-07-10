@@ -107,6 +107,21 @@ type Options struct {
 	TagPrefix       string
 	LogLevel        string
 
+	// LogError / LogAccess, when set, direct Xray to write its error (warning/
+	// info/debug) and access logs to these files instead of stdout. keen-manager
+	// points LogError at a known path so it can tail the tunnel's OWN failure
+	// reason (a dial reset, a REALITY mismatch, an i/o timeout) and surface it in
+	// the activation error — otherwise a failed bring-up only ever reports the
+	// generic "the tunnel did not carry traffic". Empty leaves Xray on stdout.
+	LogError  string
+	LogAccess string
+
+	// TCPMaxSeg clamps the MSS on every server outbound socket (see
+	// Sockopt.TCPMaxSeg). 0 leaves it unset. Applied in both TPROXY and
+	// proxy-connection modes because the egress to the server is router-local in
+	// either case.
+	TCPMaxSeg int
+
 	// SplitDomains / SplitSubnets, when either is non-empty, switch the config
 	// to per-service ("split tunnel") routing: only traffic whose destination
 	// matches one of these domains (or subnets) is sent through the server
@@ -174,7 +189,7 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 	}
 
 	cfg := &Config{
-		Log:   &Log{Loglevel: def(opts.LogLevel, "warning")},
+		Log:   &Log{Loglevel: def(opts.LogLevel, "warning"), Error: opts.LogError, Access: opts.LogAccess},
 		Stats: &struct{}{},
 		API: &API{
 			Tag:      "api",
@@ -224,6 +239,7 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("server %s: %w", s.Name, err)
 		}
+		applyMSSClamp(ob, opts.TCPMaxSeg)
 		cfg.Outbounds = append(cfg.Outbounds, *ob)
 		tags = append(tags, tag)
 	}
@@ -298,10 +314,11 @@ func buildProxyConnConfig(server model.Server, opts Options) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("server %s: %w", server.Name, err)
 	}
+	applyMSSClamp(ob, opts.TCPMaxSeg)
 
 	socksSettings, _ := json.Marshal(map[string]any{"auth": "noauth", "udp": true})
 	cfg := &Config{
-		Log: &Log{Loglevel: def(opts.LogLevel, "warning")},
+		Log: &Log{Loglevel: def(opts.LogLevel, "warning"), Error: opts.LogError, Access: opts.LogAccess},
 		Inbounds: []Inbound{{
 			Tag:      "socks-in",
 			Listen:   "127.0.0.1",
@@ -323,6 +340,23 @@ func buildProxyConnConfig(server model.Server, opts Options) (*Config, error) {
 		},
 	}
 	return cfg, nil
+}
+
+// applyMSSClamp sets TCP_MAXSEG on a server outbound's sockopt when mss > 0,
+// creating the sockopt block if the outbound didn't already have one. A
+// non-positive value is a no-op (leaves the MSS unclamped). See
+// Sockopt.TCPMaxSeg for why this matters on a router.
+func applyMSSClamp(ob *Outbound, mss int) {
+	if ob == nil || mss <= 0 {
+		return
+	}
+	if ob.StreamSettings == nil {
+		ob.StreamSettings = &StreamSettings{}
+	}
+	if ob.StreamSettings.Sockopt == nil {
+		ob.StreamSettings.Sockopt = &Sockopt{}
+	}
+	ob.StreamSettings.Sockopt.TCPMaxSeg = mss
 }
 
 // xrayDomainRules maps plain domain names onto Xray's "domain:" matcher (which

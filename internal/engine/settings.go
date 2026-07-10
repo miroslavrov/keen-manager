@@ -36,6 +36,8 @@ func (e *Engine) Settings() SettingsView {
 		KillSwitchDefault:     s.KillSwitchDefault,
 		AutoSelectIntervalMin: s.AutoSelectIntervalMin,
 		XrayIntegration:       displayXrayIntegration(s.XrayIntegration),
+		XrayLogLevel:          normalizeXrayLogLevel(s.XrayLogLevel),
+		XrayMSSClamp:          s.XrayMSSClamp,
 		Platform: PlatformView{
 			Arch:        e.Platform.Arch,
 			OSVersion:   e.Platform.OSVersion,
@@ -85,6 +87,27 @@ func (e *Engine) SaveSettings(fields map[string]any) error {
 				clearProxyDown = true
 			}
 			set.XrayIntegration = norm
+		}
+		if v, ok := getString(fields, "xray_log_level"); ok {
+			lvl := strings.ToLower(strings.TrimSpace(v))
+			switch lvl {
+			case "", "debug", "info", "warning", "error", "none":
+				// "" resets to the default (stored empty → warning at build time).
+				if lvl == "warning" {
+					lvl = "" // canonical default is the empty (omitted) value
+				}
+				set.XrayLogLevel = lvl
+			default:
+				return fmt.Errorf("invalid xray_log_level %q (want debug, info, warning, error, or none)", v)
+			}
+		}
+		if v, ok := getInt(fields, "xray_mss_clamp"); ok {
+			// Clamp obviously-bogus positive values to a sane TCP MSS window; 0 and
+			// negatives keep their special meaning (default / disabled).
+			if v > 0 && (v < 400 || v > 1460) {
+				return fmt.Errorf("invalid xray_mss_clamp %d (use 0 for auto, a negative to disable, or an MSS of 400–1460)", v)
+			}
+			set.XrayMSSClamp = v
 		}
 
 		// Password / auth handling.

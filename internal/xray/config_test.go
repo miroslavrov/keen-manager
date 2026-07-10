@@ -36,6 +36,62 @@ func TestOutboundReality(t *testing.T) {
 	}
 }
 
+func TestBuildConfigMSSClampAndLog(t *testing.T) {
+	servers := []model.Server{sampleReality("a", "1.1.1.1")}
+	opts := Defaults()
+	opts.TCPMaxSeg = 1360
+	opts.LogError = "/opt/etc/keen-manager/xray/xray-error.log"
+	opts.LogLevel = "debug"
+	cfg, err := BuildConfig(servers, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Log == nil || cfg.Log.Error != opts.LogError || cfg.Log.Loglevel != "debug" {
+		t.Fatalf("log block = %+v, want error=%q loglevel=debug", cfg.Log, opts.LogError)
+	}
+	// The server outbound (first) must carry the MSS clamp; direct/block must not.
+	so := cfg.Outbounds[0].StreamSettings.Sockopt
+	if so == nil || so.TCPMaxSeg != 1360 {
+		t.Fatalf("server outbound sockopt = %+v, want tcpMaxSeg 1360", so)
+	}
+	if so.Mark != 255 {
+		t.Errorf("expected mark 255 preserved alongside the clamp, got %d", so.Mark)
+	}
+	data, _ := Marshal(cfg)
+	if !strings.Contains(string(data), "\"tcpMaxSeg\": 1360") {
+		t.Errorf("expected tcpMaxSeg in marshalled config:\n%s", data)
+	}
+}
+
+func TestBuildConfigMSSClampProxyMode(t *testing.T) {
+	opts := Defaults()
+	opts.ProxyConnMode = true
+	opts.TCPMaxSeg = 1400
+	cfg, err := BuildConfig([]model.Server{sampleReality("a", "1.1.1.1")}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if so := cfg.Outbounds[0].StreamSettings.Sockopt; so == nil || so.TCPMaxSeg != 1400 {
+		t.Fatalf("proxy-mode outbound sockopt = %+v, want tcpMaxSeg 1400", so)
+	}
+}
+
+func TestBuildConfigNoMSSClampByDefault(t *testing.T) {
+	// TCPMaxSeg unset (0) must leave the field omitted — no behaviour change for
+	// callers that don't opt in.
+	cfg, err := BuildConfig([]model.Server{sampleReality("a", "1.1.1.1")}, Defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if so := cfg.Outbounds[0].StreamSettings.Sockopt; so != nil && so.TCPMaxSeg != 0 {
+		t.Errorf("expected no tcpMaxSeg by default, got %d", so.TCPMaxSeg)
+	}
+	data, _ := Marshal(cfg)
+	if strings.Contains(string(data), "tcpMaxSeg") {
+		t.Errorf("tcpMaxSeg must be omitted when unset:\n%s", data)
+	}
+}
+
 func TestBuildConfigBalancer(t *testing.T) {
 	servers := []model.Server{sampleReality("a", "1.1.1.1"), sampleReality("b", "2.2.2.2")}
 	opts := Defaults()

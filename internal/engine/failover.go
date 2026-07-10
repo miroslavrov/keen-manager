@@ -96,6 +96,85 @@ func (e *Engine) SetKillSwitch(on bool) error {
 	return nil
 }
 
+// ConnectorEnabled reports whether the master VPN connector is on (i.e. not
+// paused). It is the inverse of State.TunnelPaused, surfaced to the UI.
+func (e *Engine) ConnectorEnabled() bool { return !e.store.Get().TunnelPaused }
+
+// SetConnectorEnabled is the master on/off for the whole VPN egress (the single
+// "connector" switch the user wanted next to the per-route toggles). Turning it
+// OFF tears down the active tunnel and its capture so the LAN egresses direct,
+// remembering which connection was active; the background loops then stand down
+// (see failoverTick/autoSelectTick/reconcile) so nothing silently re-arms it.
+// Turning it ON restores the remembered connection (or the still-recorded active
+// one). It does NOT touch per-connection Enabled or the kill switch — "connector
+// off" means "I want normal direct internet", so no kill switch is engaged.
+func (e *Engine) SetConnectorEnabled(on bool) error {
+	if on {
+		return e.resumeConnector()
+	}
+	return e.pauseConnector()
+}
+
+// pauseConnector tears the active tunnel down and latches the paused state.
+func (e *Engine) pauseConnector() error {
+	st := e.store.Get()
+	active := st.ActiveConnID
+	if active != "" {
+		if c, ok := findConn(st, active); ok {
+			e.revertRouting(c)
+			_ = e.bringDown(c)
+			e.setRuntime(c.ID, model.RuntimeStatus{
+				ConnID: c.ID, Status: model.StatusDown, Active: false, LastCheck: time.Now(),
+				Message: "connector paused",
+			})
+		}
+	}
+	if err := e.store.Mutate(func(s *model.State) error {
+		s.TunnelPaused = true
+		if active != "" {
+			s.PausedConnID = active
+		}
+		s.ActiveConnID = ""
+		return nil
+	}); err != nil {
+		return err
+	}
+	e.foResetFail()
+	e.foResetBackoff()
+	e.Logf("connector disabled — VPN egress paused, LAN on the direct path")
+	e.publishState()
+	return nil
+}
+
+// resumeConnector clears the paused state and re-activates the remembered (or
+// still-recorded) connection, if any.
+func (e *Engine) resumeConnector() error {
+	var resume string
+	if err := e.store.Mutate(func(s *model.State) error {
+		s.TunnelPaused = false
+		resume = firstNonEmpty(s.PausedConnID, s.ActiveConnID)
+		s.PausedConnID = ""
+		return nil
+	}); err != nil {
+		return err
+	}
+	e.foResetFail()
+	e.foResetBackoff()
+	e.Logf("connector enabled — resuming VPN egress")
+	e.publishState()
+	if resume == "" {
+		return nil // nothing was active before; leave selection to the user/failover
+	}
+	if c, ok := findConn(e.store.Get(), resume); !ok || !c.Enabled {
+		return nil // remembered connection is gone/disabled — nothing to restore
+	}
+	if err := e.Activate(resume); err != nil {
+		e.Logf("connector: could not restore %s: %v", resume, err)
+		return err
+	}
+	return nil
+}
+
 // ----- failover engine (called from the background loop) -----
 
 // failoverTick evaluates the active connection and switches along the chain when
@@ -105,6 +184,11 @@ func (e *Engine) failoverTick() {
 		return
 	}
 	st := e.store.Get()
+	// Master connector switch off: stand down entirely — no failover, no
+	// nfqws-guard bring-up. The LAN is intentionally on the direct path.
+	if st.TunnelPaused {
+		return
+	}
 
 	// The nfqws-bypass guard runs first and independently of the chain: if we're
 	// on the direct path and the DPI bypass has died, fall back to a tunnel. If

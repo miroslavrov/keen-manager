@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/miroslavrov/keen-manager/internal/platform"
@@ -32,6 +33,50 @@ func (c *Controller) Installed() bool {
 // ConfigPath is the generated config location.
 func (c *Controller) ConfigPath() string {
 	return filepath.Join(c.Paths.XrayConfDir, "config.json")
+}
+
+// ErrorLogPath is where the generated config tells Xray to write its own error
+// log (warning/info/debug lines). keen-manager owns this path so it can tail the
+// tunnel's real failure reason on a failed activation. Kept under the managed
+// Xray config dir (not the shared /opt/var/log) so it is scoped to keen-manager.
+func (c *Controller) ErrorLogPath() string {
+	return filepath.Join(c.Paths.XrayConfDir, "xray-error.log")
+}
+
+// AccessLogPath is where Xray writes its access log when access logging is on.
+func (c *Controller) AccessLogPath() string {
+	return filepath.Join(c.Paths.XrayConfDir, "xray-access.log")
+}
+
+// LogTail returns the last maxLines non-empty lines of Xray's own error log, or
+// "" when the log is absent/empty. It is used to surface WHY a bring-up failed
+// (a dial reset, an i/o timeout, a REALITY mismatch) instead of the generic
+// "tunnel did not carry traffic". Best-effort: any read error yields "".
+func (c *Controller) LogTail(maxLines int) string {
+	if maxLines <= 0 {
+		maxLines = 12
+	}
+	data, err := os.ReadFile(c.ErrorLogPath())
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	out := make([]string, 0, maxLines)
+	for _, ln := range lines {
+		if strings.TrimSpace(ln) != "" {
+			out = append(out, strings.TrimSpace(ln))
+		}
+	}
+	if len(out) > maxLines {
+		out = out[len(out)-maxLines:]
+	}
+	return strings.Join(out, "\n")
+}
+
+// TruncateErrorLog clears the Xray error log so the next bring-up's log tail
+// reflects only that attempt (best-effort; ignores errors).
+func (c *Controller) TruncateErrorLog() {
+	_ = os.WriteFile(c.ErrorLogPath(), nil, 0o600)
 }
 
 func (c *Controller) bin() string {

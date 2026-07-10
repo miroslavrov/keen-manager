@@ -214,6 +214,10 @@ type StateView struct {
 	Failover           model.Failover        `json:"failover"`
 	Wan                WanView               `json:"wan"`
 	KillSwitch         bool                  `json:"kill_switch"`
+	// ConnectorEnabled is the master VPN-egress switch (inverse of
+	// State.TunnelPaused). False means the LAN is intentionally on the direct
+	// path and the background loops will not bring a tunnel up on their own.
+	ConnectorEnabled bool `json:"connector_enabled"`
 	// HookInstalled reports whether the ndm netfilter.d hook that reapplies
 	// transparent-proxy rules after a topology change is present on the router.
 	HookInstalled bool `json:"hook_installed"`
@@ -351,8 +355,14 @@ type SettingsView struct {
 	KillSwitchDefault     bool         `json:"kill_switch_default"`
 	AutoSelectIntervalMin int          `json:"auto_select_interval_min"`
 	// XrayIntegration is "auto" | "proxy" | "tproxy" (see model.Settings).
-	XrayIntegration string       `json:"xray_integration"`
-	Platform        PlatformView `json:"platform"`
+	XrayIntegration string `json:"xray_integration"`
+	// XrayLogLevel is the Xray loglevel ("warning" default; "debug" surfaces the
+	// tunnel's own failure reason on activation errors).
+	XrayLogLevel string `json:"xray_log_level"`
+	// XrayMSSClamp is the outbound MSS clamp knob (0 = auto/default, <0 =
+	// disabled, >0 = explicit MSS). See model.Settings.XrayMSSClamp.
+	XrayMSSClamp int          `json:"xray_mss_clamp"`
+	Platform     PlatformView `json:"platform"`
 }
 
 // LogView is GET /api/logs.
