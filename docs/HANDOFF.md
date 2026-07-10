@@ -1,6 +1,6 @@
 # Handoff — keen-manager (для следующего агента)
 
-Обновлено: 2026-07-10 (**16-я сессия**). Репозиторий: `github.com/miroslavrov/keen-manager`,
+Обновлено: 2026-07-10 (**17-я сессия**). Репозиторий: `github.com/miroslavrov/keen-manager`,
 ветка `main`. Коммиты от лица **miroslavrov** (git-credentials уже в песочнице; токен
 пользователь передаёт отдельно, в репозиторий НЕ коммитить). Пользователь на **KeeneticOS**
 (прошивка отдаёт release-строку `"5.01.C.0.0-1"`, это 5.1.0), arch **arm64**, тестирует
@@ -11,7 +11,30 @@
 
 ---
 
-## 0. Сессии 5–16 — что сделано и что осталось
+## 0. Сессии 5–17 — что сделано и что осталось
+
+### 17-я сессия (КОД + РЕЛИЗ) — доделан P1-UI (тумблер потока подписки = 3-й уровень выхода), P0.3 довёрстан на фронте; выпущен `v0.1.0-rc.4`. P0-гейт на устройстве ОТКРЫТ (нужны diag v4 + проверка rc.4)
+**СТАРТОВАЯ СВЕРКА (юзер: «билда нет, перепроверь что осталось»):** предыдущий безымянный прогон УЖЕ закоммитил в `main` P0.1/P0.3/P1-бэкенд (HEAD дошёл до `50ccc39`), но НЕ доделал P1-UI, НЕ собрал релиз и НЕ обновил этот файл. Релиз оставался `rc.3` (собран 11:02Z, на ~9 ч РАНЬШЕ этих коммитов) → на устройстве не было ничего нового. Всё проверено: `go build/vet/test` (зелено) + кросс arm64/arm/mips/mipsle (зелено).
+
+**ЧТО БЫЛО В main НА СТАРТЕ (проверено построчно — корректно):**
+- `chore(diag)` `06a04b3` — **diag v4** (P0.1, линчпин). `scripts/diag-tunnel.sh` переписан: (A) freedom-контроль socks→freedom (xray стартует + egress жив → вернёт WAN-IP роутера); (B) reality через plain SOCKS (путь как на телефоне, БЕЗ tproxy/dokodemo → вернёт IP сервера); НИЧЕГО не прячет (echo конфига с редактом секретов, полный вывод + код `xray -test`, «процесс жив/умер», весь лог без `| tail`), watchdog вместо busybox-`timeout`, дерево решений P0.2. Read-only.
+- `fix(xray,engine)` `d42389c` — **P0.3**: `normalizeXrayMSS` дефолт ВЫКЛ (клампит только явный `>0`; `0`/`<0` = выкл), `DefaultXrayMSS=1380` теперь лишь «подсказка UI»; `tproxy-in` dokodemo получил `routeOnly:true`.
+- `feat(model,engine)` `50ccc39` — **P1-бэкенд**: `model.Subscription.Enabled` + `SubView.Enabled` (json `enabled`), предикат `connEligible(state,conn)=conn.Enabled && subEnabled(sub)` протянут в probe/autoselect/failover/activate/rollback/resumeConnector/connView, миграция схемы **v2** (включает все существующие подписки), выкл потока рвёт активный туннель (LAN→direct), CLI `sub enable|disable`.
+
+**ЧТО СДЕЛАНО В ЭТУ СЕССИЮ:**
+- **`feat(web)` `da9cbce` — P1-UI (доделка того, чего не было):** карточка подписки получила тумблер **«Поток»** (иконка Power) — СРЕДНИЙ из трёх уровней выхода. Теперь в UI разведены ВСЕ ТРИ: **(1) master-connector** (Dashboard, `State.TunnelPaused`, session 15) → **(2) поток подписки** (новое) → **(3) per-server `Enabled`** (Connections). Выключенный поток гасит карточку + бейдж «На паузе» + глушит select-best/auto-best (демон их всё равно отбивает). Оптимистичный кэш + инвалидация connections/state (выкл может порвать туннель). Протянуто: `types.ts` (`Sub.enabled`), `api.ts` (`updateSubscription` принимает `enabled`), моки (одна подписка disabled для наглядности), i18n **EN+RU** key-for-key. **Заодно (довёрстка P0.3):** подпись MSS в Настройках больше НЕ врёт «0 = авто 1380» — `0`/`<0` = «выкл (по умолчанию)», положительное = ручной per-ISP оверрайд. Бандл `internal/webui/dist` пересобран в ТОМ ЖЕ коммите (Node 24, `npm ci`; детерминизм проверен — повторная сборка байт-в-байт → CI-гард «verify committed bundle» зелёный). web-смоук 17/17.
+- **Релиз `v0.1.0-rc.4`** (тег с дефисом = prerelease; `release.yml` → `make dist` = web + build-all + gzip 4 арки + sha256). Содержит ВСЁ: MSS-off, routeOnly, тумблер потока, diag v4.
+
+**⚠️ ГЛАВНОЕ — P0 НА УСТРОЙСТВЕ (единственный оставшийся гейт; юзер подтвердил: на роутере СТОЯЛ rc.3):**
+1. **Поведение изменилось vs rc.3:** в rc.3 MSS-clamp был ВКЛ по умолчанию, в rc.4 — ВЫКЛ. Т.е. rc.4 проверяет гипотезу session 16 «кламп был красной селёдкой». Поставить rc.4, включить `blanc` — несёт ли туннель трафик теперь?
+2. **diag v4 (линчпин, билд НЕ нужен — уже в main):** одной строкой на роутере, прислать ВЕСЬ вывод:
+   `curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/50ccc393dbc1cec6073b2b565c4e2770fbb4c709/scripts/diag-tunnel.sh | sh`
+   Развязка (P0.2): **A ок + B = IP сервера** → reality через plain SOCKS несёт как телефон ⇒ баг в TPROXY/dokodemo-capture ⇒ перевести инсталл на **proxy-client** (`Settings.XrayIntegration="proxy"`); DNS-нюанс denisitpro (явные 1.1.1.1 + `HardenProxyInterface` уже чистит name-servers — проверить). **A ок + B пусто** → reality с роутера не идёт даже через socks (глубже: сервер/транспорт/DPI на узле) ⇒ взять **ws-узел** blanc (не reality-tcp-vision). **A пусто** → xray не стартует / нет прямого инета (читать `xray -test` + лог прямо в выводе).
+
+**ОСТАЛОСЬ СЛЕДУЮЩЕМУ АГЕНТУ:**
+- **P0.2-развязка по diag v4** (см. выше) — главный приоритет.
+- **Код-гигиена, кандидат №3 из session 16 (НЕ сделан):** TPROXY-правила `internal/route/route.go` без XKeen-овских `-m socket --transparent -j MARK` (established), `-m conntrack --ctstate DNAT/INVALID -j RETURN` и `--on-ip 127.0.0.1`. Capture работает, но это дыры надёжности. Делать, если после diag остаёмся на tproxy; если уходим на proxy-client — неактуально.
+- **P1 — закрыт** (UI + бэкенд + релиз). Сверить на устройстве, что три тумблера (коннектор/подписка/сервер) ведут себя как ожидается.
 
 ### 16-я сессия (СВЕРКА С КАНОНОМ XKeen; кода НЕ меняли, HEAD остался `993477a`) — P0-гипотеза ПЕРЕСТАВЛЕНА: конфиг ПРАВИЛЬНЫЙ, расходимся в СПОСОБЕ завода трафика в Xray (TPROXY/dokodemo-door у нас vs socks/tun-клиент на рабочих ПК/телефоне)
 **Триггер:** юзер попросил свериться со статьёй Habr `ru/articles/990322` («Xray on Keenetic / Xkeen») и другими источниками — «правильно ли мы вообще делаем». Сверили: `Skrill0/XKeen` + активный форк **`jameszeroX/XKeen`** (README + FAQ `jameszero.net/faq-xkeen.htm` + `_xkeen/.../04_register_init.sh`), `xtls.github.io` (tproxy-доки), XTLS/Xray-core (vision/reality, issues). **Кода не трогали — только research + working-doc.**
