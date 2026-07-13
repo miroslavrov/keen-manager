@@ -54,10 +54,11 @@ const (
 	ChainPre = "KEENMGR_TPROXY"
 	ChainKS  = "KEENMGR_KILL"
 
-	// iptWaitSeconds is how long iptables blocks for the xtables lock before
-	// failing. KeeneticOS's ndm rewrites iptables on every topology change, so a
-	// no-wait call races it and dies with exit 4 mid-apply, stranding a
-	// half-installed chain. 5s comfortably outlasts an ndm rewrite.
+	// iptWaitSeconds documents the intended xtables lock-wait timeout (5s).
+	// The actual flag is bare "-w" (see iptArgs) because iptables v1.4.21 on
+	// Keenetic rejects the numeric form ("-w 5" → "Bad argument `5'") while the
+	// bare form carries the same default 5s wait on every version that
+	// supports -w at all (1.4.20+).
 	iptWaitSeconds = "5"
 )
 
@@ -112,8 +113,13 @@ type iptRule struct {
 
 // iptArgs prepends the xtables lock-wait flag to an iptables argument list. A
 // fresh slice is returned each call (never aliases a shared backing array).
+//
+// Uses bare "-w" (no numeric argument) because iptables v1.4.21 on Keenetic
+// supports the flag but not the timeout form ("-w 5" → "Bad argument `5'").
+// The bare flag carries the same default ~5s wait on all versions that
+// support -w (1.4.20+), which comfortably outlasts a concurrent ndm rewrite.
 func iptArgs(args ...string) []string {
-	return append([]string{"-w", iptWaitSeconds}, args...)
+	return append([]string{"-w"}, args...)
 }
 
 // markMask is the fwmark match in mask form ("0x2333/0x2333") so only our bits
@@ -140,6 +146,33 @@ func (m *Manager) Reapply() error {
 	// Remove-then-add makes this idempotent.
 	_ = m.applyChain(ChainPre, m.tproxyRules(), false)
 	return m.EnableTProxy()
+}
+
+// Verify reports whether the TPROXY capture chain is installed and the
+// PREROUTING jump points to it. It is a read-only probe (iptables -S) so it is
+// safe to call at any time, including from the post-activate verify loop. In
+// dry-run mode it returns nil (nothing to verify off-device).
+func (m *Manager) Verify() error {
+	if m.Runner.DryRun {
+		return nil
+	}
+	// The chain must exist and contain rules.
+	res := m.Runner.Run(m.IPTables, iptArgs("-t", "mangle", "-S", ChainPre)...)
+	if res.Err != nil {
+		return fmt.Errorf("TPROXY chain %s not installed: %w", ChainPre, res.Err)
+	}
+	if len(strings.TrimSpace(res.Stdout)) == 0 {
+		return fmt.Errorf("TPROXY chain %s is empty", ChainPre)
+	}
+	// The PREROUTING hook must jump to our chain.
+	res = m.Runner.Run(m.IPTables, iptArgs("-t", "mangle", "-S", "PREROUTING")...)
+	if res.Err != nil {
+		return fmt.Errorf("cannot read PREROUTING: %w", res.Err)
+	}
+	if !strings.Contains(res.Stdout, "-j "+ChainPre) {
+		return fmt.Errorf("PREROUTING does not jump to %s", ChainPre)
+	}
+	return nil
 }
 
 // EnableKillSwitch drops forwarded traffic that is not destined for the tunnel

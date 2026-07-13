@@ -35,10 +35,12 @@ func TestEnableTProxyEmitsCanonicalRules(t *testing.T) {
 	}
 	all := strings.Join(*cmds, "\n")
 
-	// Every iptables call must carry the xtables lock-wait flag.
+	// Every iptables call must carry the xtables lock-wait flag. We check for
+	// bare "-w" (no numeric arg) because iptables v1.4.21 on Keenetic rejects
+	// "-w 5"; the bare form carries the same default ~5s wait on all versions.
 	for _, line := range *cmds {
-		if strings.HasPrefix(line, "iptables ") && !strings.Contains(line, "-w 5") {
-			t.Errorf("iptables call without -w 5: %s", line)
+		if strings.HasPrefix(line, "iptables ") && !strings.Contains(line, " -w ") && !strings.HasSuffix(line, " -w") {
+			t.Errorf("iptables call without -w: %s", line)
 		}
 	}
 
@@ -89,8 +91,8 @@ func TestDisableTProxyTearsDown(t *testing.T) {
 	_ = testManager(r).DisableTProxy()
 	all := strings.Join(*cmds, "\n")
 	for _, w := range []string{
-		"iptables -w 5 -t mangle -D PREROUTING -j KEENMGR_TPROXY",
-		"iptables -w 5 -t mangle -X KEENMGR_TPROXY",
+		"iptables -w -t mangle -D PREROUTING -j KEENMGR_TPROXY",
+		"iptables -w -t mangle -X KEENMGR_TPROXY",
 		"ip rule del fwmark 0x2333/0x2333 lookup 993",
 		"ip rule del fwmark 0x2333 lookup 993",
 		"ip route flush table 993",
@@ -98,5 +100,27 @@ func TestDisableTProxyTearsDown(t *testing.T) {
 		if !strings.Contains(all, w) {
 			t.Errorf("DisableTProxy missing %q\n--- emitted ---\n%s", w, all)
 		}
+	}
+}
+
+// TestNoNumericWaitFlag ensures no iptables call uses the "-w N" numeric form
+// that iptables v1.4.21 on Keenetic rejects with "Bad argument `N'".
+func TestNoNumericWaitFlag(t *testing.T) {
+	r, cmds := capture()
+	_ = testManager(r).EnableTProxy()
+	for _, line := range *cmds {
+		if strings.Contains(line, "-w 5") || strings.Contains(line, "-w 10") {
+			t.Errorf("iptables call uses unsupported numeric -w form: %s", line)
+		}
+	}
+}
+
+// TestVerifyDryRun confirms Verify is a no-op in dry-run mode (nothing to
+// check off-device).
+func TestVerifyDryRun(t *testing.T) {
+	r, _ := capture()
+	m := testManager(r)
+	if err := m.Verify(); err != nil {
+		t.Errorf("Verify in dry-run should return nil, got: %v", err)
 	}
 }

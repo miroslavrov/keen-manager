@@ -306,11 +306,26 @@ func (e *Engine) rollback(prev string, failed model.Connection) {
 // connection, retrying until the rollback timeout elapses. It returns whether
 // the path verified and, on failure, a short human detail of the last probe
 // error (surfaced to the UI so the user learns WHY activation failed).
+//
+// For Xray in TPROXY mode, the SOCKS probe alone is insufficient: it only
+// confirms Xray can reach the server, not that LAN traffic is captured into
+// the tunnel. After a successful SOCKS probe, Verify() checks the TPROXY
+// iptables chain is installed, so "connected" means traffic actually flows
+// through the tunnel rather than a bare SOCKS reachability win.
 func (e *Engine) verifyActive(ctx context.Context, c model.Connection) (bool, string) {
 	timeout := time.Duration(e.rollbackTimeout()) * time.Second
 	deadline := time.Now().Add(timeout)
 	target := e.probeTarget()
 	const per = 6 * time.Second
+
+	// For Xray, wait for the SOCKS inbound to start listening before the
+	// first probe. Xray needs a moment after the init script restarts, and
+	// a premature probe would falsely report "connection refused".
+	if c.Type == model.ConnXray && !e.runner.DryRun {
+		waitCtx, waitCancel := context.WithTimeout(ctx, 10*time.Second)
+		e.waitPortReady(waitCtx, xraySocksHost, xraySocksPort)
+		waitCancel()
+	}
 
 	lastDetail := ""
 	for attempt := 1; time.Now().Before(deadline); attempt++ {
@@ -345,6 +360,22 @@ func (e *Engine) verifyActive(ctx context.Context, c model.Connection) (bool, st
 		}
 		cancel()
 		if p.OK {
+			// For Xray in TPROXY mode, the SOCKS probe only confirms Xray
+			// can reach the server. The real question is whether LAN
+			// traffic is captured into the tunnel, so verify the TPROXY
+			// chain is installed before declaring success. Without this
+			// check, "connected" can be true via SOCKS while TPROXY rules
+			// are missing (e.g. ndm flushed them) and no LAN traffic flows.
+			if c.Type == model.ConnXray && !e.xrayProxyMode() && !e.runner.DryRun {
+				if err := e.route.Verify(); err != nil {
+					e.Logf("verify %s: SOCKS ok but TPROXY capture missing: %v (attempt %d)", c.Name, err, attempt)
+					lastDetail = "tunnel reachable via SOCKS but TPROXY capture not installed: " + err.Error()
+					if !sleepCtx(ctx, 2*time.Second) {
+						return false, firstNonEmpty(lastDetail, "activation attempt timed out")
+					}
+					continue
+				}
+			}
 			e.Logf("verify %s: reachable (%dms, attempt %d)", c.Name, p.LatencyMs, attempt)
 			return true, ""
 		}
@@ -356,6 +387,28 @@ func (e *Engine) verifyActive(ctx context.Context, c model.Connection) (bool, st
 		}
 	}
 	return false, lastDetail
+}
+
+// waitPortReady polls a TCP port until it is accepting connections or ctx is
+// cancelled. Used to avoid a false "connection refused" from a premature
+// SOCKS probe right after Xray restarts.
+func (e *Engine) waitPortReady(ctx context.Context, host string, port int) {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	for {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		if err == nil {
+			conn.Close()
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // foActivateMarginS is added on top of the rollback (verify) budget to bound a
@@ -647,6 +700,9 @@ func (e *Engine) probeConnection(st model.State, c model.Connection) model.Runti
 }
 
 // verifyOnce is a single (non-retrying) end-to-end probe of the active path.
+// For Xray in TPROXY mode, a SOCKS success is followed by a TPROXY chain
+// check so the health loop reports "degraded" when the capture rules are gone
+// (e.g. ndm flushed them and the hook hasn't reinstalled them yet).
 func (e *Engine) verifyOnce(c model.Connection) bool {
 	// Native AWG2: use the peer-handshake signal (see verifyActive).
 	if c.Type == model.ConnAWG {
@@ -659,7 +715,15 @@ func (e *Engine) verifyOnce(c model.Connection) bool {
 	target := e.probeTarget()
 	switch c.Type {
 	case model.ConnXray:
-		return health.SOCKSHTTP(ctx, net.JoinHostPort(xraySocksHost, strconv.Itoa(xraySocksPort)), target, 6*time.Second).OK
+		if !health.SOCKSHTTP(ctx, net.JoinHostPort(xraySocksHost, strconv.Itoa(xraySocksPort)), target, 6*time.Second).OK {
+			return false
+		}
+		// SOCKS ok — for TPROXY mode, also verify the capture chain so
+		// "up" means LAN traffic actually flows through the tunnel.
+		if !e.xrayProxyMode() && !e.runner.DryRun {
+			return e.route.Verify() == nil
+		}
+		return true
 	case model.ConnAWG:
 		return health.DirectHTTP(ctx, target, 6*time.Second).OK
 	}
