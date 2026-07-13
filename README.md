@@ -221,6 +221,34 @@ chmod +x /opt/etc/init.d/S99keen-manager
 - **Method B:** copy the new `keen-manager-<arch>.gz` over and re-run the
   `KEEN_URL=…` command (or, fully manual, overwrite `/opt/bin/keen-manager` and
   run `/opt/etc/init.d/S99keen-manager restart`).
+- **Self-update:** `keen-manager update` checks GitHub for a newer release,
+  downloads the matching binary, verifies it, and atomically replaces itself.
+  Use `--force` to skip the version check.
+
+### Method C — install via opkg (IPK package)
+
+Each release includes `.ipk` packages for all router architectures. This is
+the opkg-native install path (alternative to the shell installer):
+
+```sh
+# 1. Download the IPK for your arch (arm64 shown — see the table in Method B)
+curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/v0.1.0-rc.12/keen-manager_0.1.0-rc.12_aarch64.ipk"
+
+# 2. Install
+opkg install keen-manager_0.1.0-rc.12_aarch64.ipk
+
+# 3. The postinst script starts the service automatically.
+#    Web UI: http://<router-ip>:47115
+```
+
+To set up an auto-updating opkg feed (so `opkg update && opkg upgrade
+keen-manager` works), add the feed line:
+
+```sh
+echo "src/gz keen-manager https://github.com/miroslavrov/keen-manager/releases/latest/download" >> /opt/etc/opkg/customfeeds.conf
+opkg update
+opkg install keen-manager
+```
 
 ### Manage the service
 
@@ -413,9 +441,10 @@ their own upstreams, under their own terms): the `nfqws2` daemon
 - [x] On-device selftest (`keen-manager selftest` — xray, SOCKS, TPROXY, nfqws, …)
 - [x] Self-update (`keen-manager update` — check GitHub, download, verify, atomic replace)
 - [x] Fast reload (`Controller.Reload` — fast process restart, no init-script sleep)
-- [ ] Xray gRPC hot-reload (swap outbounds without any process restart)
-- [ ] IPK packaging + hosted opkg feed
-- [ ] On-device integration tests
+- [x] gRPC hot-reload (`Controller.HotReload` — swap outbounds via `xray api`, no restart)
+- [x] IPK packaging + opkg feed support (`.ipk` packages published per release)
+- [x] On-device integration tests (`keen-manager integration-test` — activate, verify, pause/resume, reapply)
+- [ ] Auto-update on a schedule (periodic background check + notify)
 
 ## Disclaimer
 
@@ -651,6 +680,34 @@ chmod +x /opt/etc/init.d/S99keen-manager
 - **Способ B:** перекинь новый `keen-manager-<arch>.gz` и повтори команду с
   `KEEN_URL=…` (или, вручную, перезапиши `/opt/bin/keen-manager` и выполни
   `/opt/etc/init.d/S99keen-manager restart`).
+- **Самообновление:** `keen-manager update` проверяет GitHub на наличие нового
+  релиза, скачивает нужный бинарь, проверяет его и атомарно заменяет.
+  Используй `--force` чтобы пропустить проверку версии.
+
+### Способ C — установка через opkg (IPK-пакет)
+
+Каждый релиз включает `.ipk`-пакеты для всех архитектур роутеров. Это
+opkg-нативный путь установки (альтернатива шелл-установщику):
+
+```sh
+# 1. Скачай IPK под свою архитектуру (показан arm64)
+curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/v0.1.0-rc.12/keen-manager_0.1.0-rc.12_aarch64.ipk"
+
+# 2. Установи
+opkg install keen-manager_0.1.0-rc.12_aarch64.ipk
+
+# 3. Postinst-скрипт сам запустит сервис.
+#    Веб-интерфейс: http://<IP-роутера>:47115
+```
+
+Чтобы настроить автообновляемый opkg-фиод (чтобы работало `opkg update &&
+opkg upgrade keen-manager`), добавь строку фида:
+
+```sh
+echo "src/gz keen-manager https://github.com/miroslavrov/keen-manager/releases/latest/download" >> /opt/etc/opkg/customfeeds.conf
+opkg update
+opkg install keen-manager
+```
 
 ### Управление сервисом
 
@@ -844,9 +901,10 @@ keen-manager под лицензией **MIT** (см. [`LICENSE`](LICENSE)).
 - [x] Самотест на устройстве (`keen-manager selftest` — xray, SOCKS, TPROXY, nfqws, …)
 - [x] Самообновление (`keen-manager update` — проверка GitHub, скачивание, проверка, атомарная замена)
 - [x] Быстрый reload (`Controller.Reload` — быстрый рестарт процесса, без sleep init-script)
-- [ ] gRPC hot-reload Xray (смена аутбаундов без рестарта процесса)
-- [ ] Упаковка в IPK + хостинг opkg-фида
-- [ ] Интеграционные тесты на устройстве
+- [x] gRPC hot-reload (`Controller.HotReload` — смена аутбаундов через `xray api`, без рестарта)
+- [x] IPK-пакеты + поддержка opkg-фида (`.ipk` файлы публикуются в каждом релизе)
+- [x] Интеграционные тесты на устройстве (`keen-manager integration-test` — активация, проверка, pause/resume, reapply)
+- [ ] Авто-обновление по расписанию (периодическая проверка в фоне + уведомление)
 
 ## Отказ от ответственности
 

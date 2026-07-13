@@ -71,6 +71,8 @@ func main() {
 		fmt.Println(version.String())
 	case "selftest":
 		cmdSelftest(rest)
+	case "integration-test":
+		cmdIntegrationTest(rest)
 	case "update":
 		cmdUpdate(rest)
 	case "help", "-h", "--help":
@@ -132,6 +134,7 @@ COMMANDS:
   install-hook                 install the ndm netfilter.d hook (done by installer)
   uninstall-hook               remove the ndm netfilter.d hook
   selftest                     run on-device diagnostics (xray, SOCKS, TPROXY, nfqws, …)
+  integration-test             run functional tests (activate, verify, pause/resume, reapply)
   update                       check GitHub for a newer release and self-update
   version                      print the version
 
@@ -580,6 +583,40 @@ func cmdSelftest(args []string) {
 			icon = "SKIP"
 		}
 		fmt.Printf("  [%s] %s: %s\n", icon, r.Name, r.Detail)
+	}
+	if fail > 0 {
+		os.Exit(1)
+	}
+}
+
+func cmdIntegrationTest(args []string) {
+	eng := openEngine()
+	results := eng.IntegrationTest()
+	pass, fail, skip := 0, 0, 0
+	for _, r := range results {
+		switch r.Status {
+		case "pass":
+			pass++
+		case "fail":
+			fail++
+		case "skip":
+			skip++
+		}
+	}
+	fmt.Printf("keen-manager integration-test: %d pass, %d fail, %d skip\n\n", pass, fail, skip)
+	for _, r := range results {
+		icon := "OK"
+		switch r.Status {
+		case "fail":
+			icon = "FAIL"
+		case "skip":
+			icon = "SKIP"
+		}
+		ms := ""
+		if r.MS > 0 {
+			ms = fmt.Sprintf(" (%dms)", r.MS)
+		}
+		fmt.Printf("  [%s] %s: %s%s\n", icon, r.Name, r.Detail, ms)
 	}
 	if fail > 0 {
 		os.Exit(1)

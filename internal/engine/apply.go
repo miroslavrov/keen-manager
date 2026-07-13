@@ -10,6 +10,7 @@ import (
 
 	"github.com/miroslavrov/keen-manager/internal/health"
 	"github.com/miroslavrov/keen-manager/internal/model"
+	"github.com/miroslavrov/keen-manager/internal/platform"
 	"github.com/miroslavrov/keen-manager/internal/xray"
 )
 
@@ -218,7 +219,14 @@ func (e *Engine) bringUpCtx(ctx context.Context, c model.Connection) error {
 		if err != nil {
 			return err
 		}
-		_, err = e.xray.Apply(cfg) // writes + validates + restarts
+		// Hot-reload path: if Xray is already running (switching servers),
+		// try gRPC API to swap outbounds without a process restart.
+		// Falls back to Apply (full restart) on any failure.
+		if e.xrayRunning() && !e.xrayProxyMode() {
+			_, err = e.xray.HotReload(cfg)
+		} else {
+			_, err = e.xray.Apply(cfg) // writes + validates + restarts
+		}
 		return err
 	}
 	return fmt.Errorf("unknown connection type %q", c.Type)
@@ -300,6 +308,20 @@ func (e *Engine) rollback(prev string, failed model.Connection) {
 	}
 	_ = e.setActive("")
 	e.publishState()
+}
+
+// xrayRunning reports whether the Xray process is currently active (has a
+// managed config and the process is alive). Used to decide between hot-reload
+// (gRPC API swap) and a full Apply (process restart).
+func (e *Engine) xrayRunning() bool {
+	if e.runner.DryRun {
+		return false
+	}
+	if !platform.FileExists(e.xray.ConfigPath()) {
+		return false
+	}
+	res := e.runner.Run("pgrep", "-f", "xray run")
+	return res.Err == nil
 }
 
 // verifyActive probes end-to-end connectivity through the freshly-activated

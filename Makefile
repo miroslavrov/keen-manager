@@ -128,6 +128,15 @@ dist: web build-all
 	@echo ">> dist complete:"
 	@ls -lh $(BUILD_DIR)/*.gz 2>/dev/null || true
 
+# ---- IPK packaging (Entware/opkg) ------------------------------------------
+# Builds .ipk packages for each router arch. Requires `ar` (binutils).
+.PHONY: ipk
+ipk: build-all
+	@echo ">> building IPK packages in $(BUILD_DIR)/"
+	@sh scripts/build-ipk.sh "$(VERSION)" "$(BUILD_DIR)"
+	@echo ">> IPK packages:"
+	@ls -lh $(BUILD_DIR)/*.ipk 2>/dev/null || true
+
 # ---- QA --------------------------------------------------------------------
 .PHONY: test
 test:
