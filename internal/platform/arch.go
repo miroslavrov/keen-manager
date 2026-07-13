@@ -141,6 +141,37 @@ func ELFArch(path string) (Arch, bool) {
 	return ArchUnknown, true
 }
 
+// ELFArchBytes is like ELFArch but takes a byte slice instead of a file path.
+// Used by the updater to verify a downloaded binary without writing it to disk.
+func ELFArchBytes(data []byte) (Arch, bool) {
+	if len(data) < 20 {
+		return ArchUnknown, false
+	}
+	h := data[:20]
+	if h[0] != 0x7f || h[1] != 'E' || h[2] != 'L' || h[3] != 'F' {
+		return ArchUnknown, false
+	}
+	bigEndian := h[5] == 0x02
+	machine := uint16(h[18]) | uint16(h[19])<<8
+	if bigEndian {
+		machine = uint16(h[19]) | uint16(h[18])<<8
+	}
+	switch machine {
+	case 0x08:
+		if bigEndian {
+			return ArchMIPS, true
+		}
+		return ArchMIPSLE, true
+	case 0x28:
+		return ArchARM, true
+	case 0x3e:
+		return ArchAMD64, true
+	case 0xb7:
+		return ArchARM64, true
+	}
+	return ArchUnknown, true
+}
+
 // bigEndianELF inspects the EI_DATA byte (offset 5) of a system binary:
 // 0x01 = little-endian, 0x02 = big-endian.
 func bigEndianELF() bool {

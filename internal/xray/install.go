@@ -185,6 +185,10 @@ func (c *Controller) unusableBinaryReason() string {
 	return ""
 }
 
+// UnusableReason returns a human-readable reason if the managed xray binary
+// cannot run on this device, or "" if it's fine. Public for the selftest command.
+func (c *Controller) UnusableReason() string { return c.unusableBinaryReason() }
+
 // Install downloads the given xray-core version for the detected architecture,
 // extracts the xray binary to Paths.XrayBin (atomic write + chmod 0755), and
 // verifies it runs. Network + filesystem effects; skipped by Ensure in dry-run.

@@ -13,12 +13,14 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/miroslavrov/keen-manager/internal/engine"
 	"github.com/miroslavrov/keen-manager/internal/model"
 	"github.com/miroslavrov/keen-manager/internal/nfqws"
 	"github.com/miroslavrov/keen-manager/internal/platform"
 	"github.com/miroslavrov/keen-manager/internal/server"
+	"github.com/miroslavrov/keen-manager/internal/updater"
 	"github.com/miroslavrov/keen-manager/internal/version"
 )
 
@@ -67,6 +69,10 @@ func main() {
 		fmt.Println("ndm netfilter hook removed")
 	case "version", "-v", "--version":
 		fmt.Println(version.String())
+	case "selftest":
+		cmdSelftest(rest)
+	case "update":
+		cmdUpdate(rest)
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -125,6 +131,8 @@ COMMANDS:
   route status                 report whether the ndm netfilter hook is wired
   install-hook                 install the ndm netfilter.d hook (done by installer)
   uninstall-hook               remove the ndm netfilter.d hook
+  selftest                     run on-device diagnostics (xray, SOCKS, TPROXY, nfqws, …)
+  update                       check GitHub for a newer release and self-update
   version                      print the version
 
 ENVIRONMENT:
@@ -542,4 +550,49 @@ func printJSON(v any) {
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "keen-manager: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+func cmdSelftest(args []string) {
+	eng := openEngine()
+	results := eng.SelfTest()
+	pass, fail, warn, skip := 0, 0, 0, 0
+	for _, r := range results {
+		switch r.Status {
+		case "pass":
+			pass++
+		case "fail":
+			fail++
+		case "warn":
+			warn++
+		case "skip":
+			skip++
+		}
+	}
+	fmt.Printf("keen-manager selftest: %d pass, %d fail, %d warn, %d skip\n\n", pass, fail, warn, skip)
+	for _, r := range results {
+		icon := "OK"
+		switch r.Status {
+		case "fail":
+			icon = "FAIL"
+		case "warn":
+			icon = "WARN"
+		case "skip":
+			icon = "SKIP"
+		}
+		fmt.Printf("  [%s] %s: %s\n", icon, r.Name, r.Detail)
+	}
+	if fail > 0 {
+		os.Exit(1)
+	}
+}
+
+func cmdUpdate(args []string) {
+	force := len(args) > 0 && (args[0] == "--force" || args[0] == "-f" || args[0] == "force")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	msg, err := updater.SelfUpdate(ctx, force)
+	if err != nil {
+		fatal("update: %v", err)
+	}
+	fmt.Println(msg)
 }

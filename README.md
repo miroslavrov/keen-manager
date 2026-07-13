@@ -410,8 +410,10 @@ their own upstreams, under their own terms): the `nfqws2` daemon
 - [x] ndm race retry (chain-vanished during apply → automatic retry)
 - [x] Health loop: SOCKS-first probe for active Xray (handles IPv4 TCP broken on router)
 - [x] TPROXY verify in activation + health loop (SOCKS ok → verify capture chain)
-- [ ] Xray gRPC hot-reload (swap outbounds without a full restart)
-- [ ] Policy-based routing per device group (Keenetic policy fwmark integration)
+- [x] On-device selftest (`keen-manager selftest` — xray, SOCKS, TPROXY, nfqws, …)
+- [x] Self-update (`keen-manager update` — check GitHub, download, verify, atomic replace)
+- [x] Fast reload (`Controller.Reload` — fast process restart, no init-script sleep)
+- [ ] Xray gRPC hot-reload (swap outbounds without any process restart)
 - [ ] IPK packaging + hosted opkg feed
 - [ ] On-device integration tests
 
@@ -839,8 +841,10 @@ keen-manager под лицензией **MIT** (см. [`LICENSE`](LICENSE)).
 - [x] Retry при гонке ndm (цепочка пропала во время apply → автоматический retry)
 - [x] Health loop: SOCKS-first проба для активного Xray (работает при сломанном IPv4 TCP)
 - [x] TPROXY verify при активации + в health loop (SOCKS ок → проверка цепочки захвата)
-- [ ] Горячая перезагрузка Xray через gRPC (смена аутбаундов без полного рестарта)
-- [ ] Policy-based маршрутизация по группам устройств (интеграция с fwmark-политиками Keenetic)
+- [x] Самотест на устройстве (`keen-manager selftest` — xray, SOCKS, TPROXY, nfqws, …)
+- [x] Самообновление (`keen-manager update` — проверка GitHub, скачивание, проверка, атомарная замена)
+- [x] Быстрый reload (`Controller.Reload` — быстрый рестарт процесса, без sleep init-script)
+- [ ] gRPC hot-reload Xray (смена аутбаундов без рестарта процесса)
 - [ ] Упаковка в IPK + хостинг opkg-фида
 - [ ] Интеграционные тесты на устройстве
 

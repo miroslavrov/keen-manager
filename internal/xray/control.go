@@ -256,6 +256,54 @@ func (c *Controller) Apply(cfg *Config) (string, error) {
 	return path, nil
 }
 
+// Reload writes+validates the config and does a fast process restart
+// (kill + immediate restart, skipping the init script's sleep). This is
+// significantly faster than Apply (~0.5s vs ~3-5s) because:
+//   - no init script overhead
+//   - no sleep between stop and start
+//   - the SOCKS port readiness wait in verifyActive handles the gap
+//
+// Falls back to full Restart() if the fast path fails.
+func (c *Controller) Reload(cfg *Config) (string, error) {
+	path, err := c.WriteConfig(cfg)
+	if err != nil {
+		return "", err
+	}
+	if err := c.fastRestart(); err != nil {
+		if c.Logf != nil {
+			c.Logf("fast reload failed, falling back to full restart: %v", err)
+		}
+		if err2 := c.Restart(); err2 != nil {
+			return path, err2
+		}
+	}
+	return path, nil
+}
+
+// fastRestart kills the xray process and immediately starts a new one
+// without going through the init script (no sleep, no shell overhead).
+func (c *Controller) fastRestart() error {
+	// Kill existing xray process(es).
+	_ = c.Runner.Run("pkill", "-f", c.bin()+" run")
+	// Brief wait for the port to release (much shorter than init script's sleep 1).
+	time.Sleep(200 * time.Millisecond)
+	// Start xray detached in the background.
+	return c.startDetached()
+}
+
+// startDetached launches xray in the background (detached from this process)
+// so the caller doesn't block on xray's foreground run.
+func (c *Controller) startDetached() error {
+	bin := c.bin()
+	confDir := c.Paths.XrayConfDir
+	// Prefer setsid for clean detachment; fall back to plain background.
+	if platform.Which("setsid") {
+		return c.Runner.MustRun("setsid", bin, "run", "-confdir", confDir)
+	}
+	// No setsid: use sh -c with background + nohup-like redirect.
+	return c.Runner.MustRun("sh", "-c", bin+" run -confdir "+confDir+" >/dev/null 2>&1 &")
+}
+
 // Start/Stop/Restart drive the init script when present, else manage the process
 // directly (foreground binary backgrounded by the OS init).
 func (c *Controller) Start() error   { return c.service("start") }
