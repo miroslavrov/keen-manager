@@ -1,9 +1,12 @@
 package xray
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/miroslavrov/keen-manager/internal/model"
@@ -80,6 +83,53 @@ func TestWriteConfigAtomicRename(t *testing.T) {
 	// The validation ran against the ".tmp" file with the forced JSON format.
 	if len(*cmds) == 0 || !strings.Contains((*cmds)[0], "-format json") {
 		t.Errorf("expected a -format json validate command, got %v", *cmds)
+	}
+}
+
+// TestIsExecFormatError covers the classifier that separates an OS-level
+// "can't run this binary" failure (wrong CPU arch / corrupt / not +x) from a
+// config error Xray itself reported — so the former gets a legible message
+// instead of a raw "fork/exec …: exec format error".
+func TestIsExecFormatError(t *testing.T) {
+	yes := []error{
+		syscall.ENOEXEC,
+		syscall.EACCES,
+		fmt.Errorf("fork/exec /opt/sbin/xray: %w", syscall.ENOEXEC),
+		errors.New("fork/exec /opt/sbin/xray: exec format error"),
+		errors.New("fork/exec /opt/sbin/xray: permission denied"),
+	}
+	for _, e := range yes {
+		if !isExecFormatError(e) {
+			t.Errorf("isExecFormatError(%v) = false, want true", e)
+		}
+	}
+	no := []error{
+		nil,
+		errors.New("context deadline exceeded"),
+		errors.New(`infra/conf: invalid "password"`),
+	}
+	for _, e := range no {
+		if isExecFormatError(e) {
+			t.Errorf("isExecFormatError(%v) = true, want false", e)
+		}
+	}
+}
+
+// TestExecFormatDetail confirms the operator-facing message names the arch
+// mismatch (when the ELF header reveals it) and always points at the remedy.
+func TestExecFormatDetail(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "xray")
+	arm64ELF := make([]byte, 20)
+	copy(arm64ELF, []byte{0x7f, 'E', 'L', 'F', 2, 1})
+	arm64ELF[18] = 0xb7 // EM_AARCH64
+	if err := os.WriteFile(bin, arm64ELF, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := NewController(platform.Paths{XrayBin: bin}, &platform.Runner{DryRun: true})
+	detail := c.execFormatDetail()
+	if !strings.Contains(detail, "arm64") || !strings.Contains(detail, "KEEN_XRAY_URL") {
+		t.Fatalf("execFormatDetail = %q, want it to name arm64 and the KEEN_XRAY_URL remedy", detail)
 	}
 }
 

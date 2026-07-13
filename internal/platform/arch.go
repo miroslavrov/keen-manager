@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -90,6 +91,54 @@ func archFromUname() Arch {
 		return ArchMIPSLE
 	}
 	return ArchUnknown
+}
+
+// ELFArch reads the ELF header of the file at path and reports which CPU
+// architecture the binary targets, plus whether the file is a valid ELF at all.
+// It NEVER executes the file — it only inspects header bytes — so it is safe to
+// call on a binary of the wrong architecture. That is exactly the case it exists
+// to diagnose: a present-but-unrunnable /opt/sbin/xray (left by an earlier
+// install, copied from the wrong build, or a download the ISP's DPI cut short)
+// otherwise only reveals itself as a cryptic "exec format error" the moment the
+// engine forks it.
+//
+// The bool is false when path is missing or is not an ELF (e.g. a shell script,
+// an HTML error page a failed download saved, or a still-compressed archive); in
+// that case Arch is ArchUnknown. A valid ELF whose e_machine we don't map (say a
+// plain x86 build) yields (ArchUnknown, true).
+func ELFArch(path string) (Arch, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return ArchUnknown, false
+	}
+	defer f.Close()
+	var h [20]byte
+	if _, err := io.ReadFull(f, h[:]); err != nil {
+		return ArchUnknown, false
+	}
+	if h[0] != 0x7f || h[1] != 'E' || h[2] != 'L' || h[3] != 'F' {
+		return ArchUnknown, false
+	}
+	bigEndian := h[5] == 0x02 // EI_DATA: 0x01 = LE, 0x02 = BE
+	// e_machine is a 2-byte field at offset 18, in the file's byte order.
+	machine := uint16(h[18]) | uint16(h[19])<<8
+	if bigEndian {
+		machine = uint16(h[19]) | uint16(h[18])<<8
+	}
+	switch machine {
+	case 0x08: // EM_MIPS — endianness distinguishes the two MIPS targets
+		if bigEndian {
+			return ArchMIPS, true
+		}
+		return ArchMIPSLE, true
+	case 0x28: // EM_ARM (32-bit)
+		return ArchARM, true
+	case 0x3e: // EM_X86_64
+		return ArchAMD64, true
+	case 0xb7: // EM_AARCH64
+		return ArchARM64, true
+	}
+	return ArchUnknown, true
 }
 
 // bigEndianELF inspects the EI_DATA byte (offset 5) of a system binary:

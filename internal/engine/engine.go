@@ -128,6 +128,9 @@ func New(paths platform.Paths, dryRun bool) (*Engine, error) {
 		startTime: time.Now(),
 	}
 	runner.Log = func(cmd string) { e.logs.appendf("exec: %s", cmd) }
+	// Let the Xray controller surface lifecycle messages (e.g. auto-healing a
+	// present-but-unrunnable binary) into the shared log stream.
+	e.xray.Logf = e.Logf
 	// Reinstate the persisted web UI password (kept in the 0600 vault, not in
 	// state.json) and self-heal the "auth enabled but no password" lockout.
 	e.loadAuthFromVault()

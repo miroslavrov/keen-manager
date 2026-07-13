@@ -1,10 +1,12 @@
 package xray
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/miroslavrov/keen-manager/internal/platform"
@@ -18,6 +20,16 @@ type Controller struct {
 	Runner *platform.Runner
 	// InitScript is the Entware init script name (default S99xray) if present.
 	InitScript string
+	// Logf, when set, receives human-readable lifecycle messages (e.g. an
+	// automatic binary reinstall). Optional; nil disables such logging.
+	Logf func(format string, args ...any)
+}
+
+// logf emits a lifecycle message when a logger is wired, else drops it.
+func (c *Controller) logf(format string, args ...any) {
+	if c.Logf != nil {
+		c.Logf(format, args...)
+	}
 }
 
 // NewController returns a Controller with defaults.
@@ -102,19 +114,57 @@ func (c *Controller) Validate(configPath string) error {
 		return fmt.Errorf("xray binary not found")
 	}
 	res := c.Runner.Run(c.bin(), "-test", "-config", configPath, "-format", "json")
-	if res.Err != nil {
-		// Xray writes a failed `-test` to stdout (it dies before the app logger,
-		// and before honouring the config's own log.error file), so prefer stdout
-		// and distil the wall of banner+trace down to the innermost cause. Fall
-		// back to the exec error itself (e.g. a timeout that produced no output)
-		// so the reason is never blank.
-		detail := distillXrayTestError(firstNonEmptyStr(res.Stdout, res.Stderr))
-		if detail == "" {
-			detail = res.Err.Error()
-		}
-		return fmt.Errorf("xray config invalid: %s", detail)
+	if res.Err == nil {
+		return nil
 	}
-	return nil
+	// A binary that cannot be executed at all (wrong CPU architecture, corrupt,
+	// or not +x) produces no `-test` output to distil — just an opaque
+	// "fork/exec …: exec format error". Rephrase it into something the operator
+	// can act on. keen-manager auto-heals this on the next activation (Ensure
+	// reinstalls the correct build), but a DPI-blocked router may need the
+	// manual/offline path, so the message points there.
+	if isExecFormatError(res.Err) {
+		return fmt.Errorf("xray config invalid: %s", c.execFormatDetail())
+	}
+	// Xray writes a failed `-test` to stdout (it dies before the app logger, and
+	// before honouring the config's own log.error file), so prefer stdout and
+	// distil the wall of banner+trace down to the innermost cause. Fall back to
+	// the exec error itself (e.g. a timeout that produced no output) so the
+	// reason is never blank.
+	detail := distillXrayTestError(firstNonEmptyStr(res.Stdout, res.Stderr))
+	if detail == "" {
+		detail = res.Err.Error()
+	}
+	return fmt.Errorf("xray config invalid: %s", detail)
+}
+
+// isExecFormatError reports whether err is the OS refusing to execute the
+// binary (ENOEXEC "exec format error" / EACCES) rather than a config problem
+// Xray itself reported. It matches both the wrapped syscall errno and the
+// textual form, so it holds regardless of how the runner surfaced it.
+func isExecFormatError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.ENOEXEC) || errors.Is(err, syscall.EACCES) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "exec format error") ||
+		strings.Contains(msg, "permission denied")
+}
+
+// execFormatDetail explains, actionably, why the binary would not execute —
+// naming the mismatched architectures when the ELF header reveals them.
+func (c *Controller) execFormatDetail() string {
+	path := c.bin()
+	const remedy = "keen-manager reinstalls the correct build automatically on the next activation; if your ISP blocks GitHub, put a matching xray in place and set KEEN_XRAY_URL (see README)"
+	device := platform.DetectArch()
+	if got, isELF := platform.ELFArch(path); isELF && got != platform.ArchUnknown &&
+		device != platform.ArchUnknown && got != device {
+		return fmt.Sprintf("the xray binary at %s is built for %s but this router is %s — it cannot run here (exec format error). %s", path, got, device, remedy)
+	}
+	return fmt.Sprintf("the xray binary at %s cannot be executed on this router (exec format error) — it is the wrong CPU architecture or corrupt. %s", path, remedy)
 }
 
 // distillXrayTestError reduces the multi-line output of a failed `xray -test`

@@ -56,6 +56,49 @@ func downloadURL(version string, arch platform.Arch) (string, error) {
 	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", XrayRepo, version, asset), nil
 }
 
+// installSource returns where Install should fetch xray from. KEEN_XRAY_URL,
+// when set, overrides the official GitHub release URL — the offline escape
+// hatch for a router whose ISP DPI blocks GitHub's release-asset CDN. It may be
+// an http(s):// or file:// URL pointing at either a release .zip or a raw xray
+// binary (extractXrayBinary handles both).
+func installSource(version string, arch platform.Arch) (string, error) {
+	if u := strings.TrimSpace(os.Getenv("KEEN_XRAY_URL")); u != "" {
+		return u, nil
+	}
+	return downloadURL(version, arch)
+}
+
+// fetchInstallBytes reads an install payload from a file:// path or downloads it
+// over http(s)://, capped at 64 MiB.
+func fetchInstallBytes(ctx context.Context, src string) ([]byte, error) {
+	if rest, ok := strings.CutPrefix(src, "file://"); ok {
+		data, err := os.ReadFile(rest)
+		if err != nil {
+			return nil, fmt.Errorf("xray: read %s: %w", src, err)
+		}
+		return data, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "keen-manager")
+	client := &http.Client{Timeout: 3 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("xray: download %s: %w", src, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("xray: download %s: HTTP %d", src, resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20)) // 64 MiB cap
+	if err != nil {
+		return nil, fmt.Errorf("xray: read download: %w", err)
+	}
+	return data, nil
+}
+
 // resolveVersion decides which Xray-core version to install: KEEN_XRAY_VERSION
 // when set, else the latest release tag from the GitHub API, else the pinned
 // FallbackXrayVersion.
@@ -84,11 +127,26 @@ func resolveVersion(ctx context.Context) string {
 	return FallbackXrayVersion
 }
 
-// Ensure installs xray-core (and its init script) if not already present. It is
-// a no-op when the binary already exists (it still ensures the init script) and
-// in dry-run mode. Call it before applying an Xray config.
+// Ensure installs xray-core (and its init script) if not already present, and
+// heals a present-but-unusable binary. It is otherwise a no-op (it still ensures
+// the init script) and does nothing in dry-run mode. Call it before applying an
+// Xray config.
+//
+// A file existing at XrayBin is NOT proof it can run: a wrong-architecture or
+// corrupt /opt/sbin/xray (left by an earlier install, copied from the wrong
+// build, or a download the ISP's DPI cut short and that was saved anyway) still
+// satisfies Installed(), yet every `xray -test` / `xray run` against it dies
+// with "exec format error". Trusting mere existence is what stranded activation.
+// So when a managed binary is present but unusable, reinstall the correct build
+// in place rather than forking a binary we already know cannot run.
 func (c *Controller) Ensure(ctx context.Context) error {
 	if c.Installed() {
+		if reason := c.unusableBinaryReason(); reason != "" {
+			c.logf("xray: %s — reinstalling the correct build", reason)
+			if err := c.Install(ctx, resolveVersion(ctx)); err != nil {
+				return fmt.Errorf("%s, and reinstalling it failed: %w", reason, err)
+			}
+		}
 		return c.ensureInitScript()
 	}
 	if c.Runner.DryRun {
@@ -100,33 +158,52 @@ func (c *Controller) Ensure(ctx context.Context) error {
 	return c.ensureInitScript()
 }
 
+// unusableBinaryReason returns a human-readable reason the managed xray binary
+// cannot run on this device, or "" when it looks fine. It first inspects the
+// ELF header (no execution — safe on a wrong-arch binary) to catch the common
+// "wrong CPU architecture" case with a precise message, then falls back to
+// actually running `xray -version` to catch corruption a header check would
+// miss. It returns "" in dry-run / off-device and when xray is only resolvable
+// on PATH (not our managed file) — there is nothing we own to heal.
+func (c *Controller) unusableBinaryReason() string {
+	if c.Runner.DryRun || !platform.FileExists(c.Paths.XrayBin) {
+		return ""
+	}
+	path := c.Paths.XrayBin
+	device := platform.DetectArch()
+	got, isELF := platform.ELFArch(path)
+	switch {
+	case !isELF:
+		return fmt.Sprintf("the file at %s is not a valid executable (a corrupt or partial download, or the wrong kind of file)", path)
+	case got != platform.ArchUnknown && device != platform.ArchUnknown && got != device:
+		return fmt.Sprintf("the xray binary at %s is built for %s but this device is %s (exec format error)", path, got, device)
+	}
+	// Header looks compatible (or we could not tell) — confirm it truly runs.
+	if res := c.Runner.Run(path, "-version"); res.Err != nil {
+		return fmt.Sprintf("the xray binary at %s does not execute (%v)", path, res.Err)
+	}
+	return ""
+}
+
 // Install downloads the given xray-core version for the detected architecture,
 // extracts the xray binary to Paths.XrayBin (atomic write + chmod 0755), and
 // verifies it runs. Network + filesystem effects; skipped by Ensure in dry-run.
+//
+// The source is the official GitHub release .zip unless KEEN_XRAY_URL is set,
+// in which case that URL wins — the offline escape hatch for a router whose ISP
+// DPI resets GitHub's release-asset CDN (the README documents the same file://
+// trick for installing keen-manager itself). KEEN_XRAY_URL may point at a
+// release .zip or straight at a raw xray binary, over http(s):// or file://.
 func (c *Controller) Install(ctx context.Context, version string) error {
 	arch := platform.DetectArch()
-	url, err := downloadURL(version, arch)
+	src, err := installSource(version, arch)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	data, err := fetchInstallBytes(ctx, src)
 	if err != nil {
 		return err
-	}
-	req.Header.Set("User-Agent", "keen-manager")
-	client := &http.Client{Timeout: 3 * time.Minute}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("xray: download %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("xray: download %s: HTTP %d", url, resp.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20)) // 64 MiB cap
-	if err != nil {
-		return fmt.Errorf("xray: read download: %w", err)
 	}
 
 	bin, err := extractXrayBinary(data)
@@ -152,9 +229,14 @@ func (c *Controller) Install(ctx context.Context, version string) error {
 	return nil
 }
 
-// extractXrayBinary pulls the "xray" file out of a release .zip archive.
-func extractXrayBinary(zipData []byte) ([]byte, error) {
-	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+// extractXrayBinary returns the xray binary from an install payload. A raw ELF
+// (a KEEN_XRAY_URL pointing straight at the binary) is used as-is; otherwise the
+// payload is treated as a release .zip and its "xray" entry is extracted.
+func extractXrayBinary(data []byte) ([]byte, error) {
+	if isELFHeader(data) {
+		return data, nil
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, fmt.Errorf("xray: open release zip: %w", err)
 	}
@@ -173,6 +255,11 @@ func extractXrayBinary(zipData []byte) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("xray: 'xray' binary not found in release archive")
+}
+
+// isELFHeader reports whether b starts with the ELF magic number.
+func isELFHeader(b []byte) bool {
+	return len(b) >= 4 && b[0] == 0x7f && b[1] == 'E' && b[2] == 'L' && b[3] == 'F'
 }
 
 // ensureInitScript writes the Entware init script (S99xray) if absent, so Xray
