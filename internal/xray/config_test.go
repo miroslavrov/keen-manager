@@ -324,3 +324,42 @@ func TestBuildConfigSinglePin(t *testing.T) {
 		t.Error("expected pinned outboundTag rule srv-a")
 	}
 }
+
+// TestDirectBlockCarrySelfMark guards the rc.8 TPROXY blackhole fix: the direct
+// (freedom) and block (blackhole) outbounds must carry SO_MARK == selfMark so
+// traffic Xray routes to them egresses on a socket the capture chain excludes,
+// instead of being re-captured/mis-routed and blackholed. Applies in both the
+// full/TPROXY build and the proxy-conn build.
+func TestDirectBlockCarrySelfMark(t *testing.T) {
+	check := func(name string, cfg *Config) {
+		for _, tag := range []string{"direct", "block"} {
+			var found bool
+			for _, ob := range cfg.Outbounds {
+				if ob.Tag != tag {
+					continue
+				}
+				found = true
+				if ob.StreamSettings == nil || ob.StreamSettings.Sockopt == nil || ob.StreamSettings.Sockopt.Mark != selfMark {
+					t.Errorf("%s: %s outbound must carry sockopt mark %d, got %+v", name, tag, selfMark, ob.StreamSettings)
+				}
+			}
+			if !found {
+				t.Errorf("%s: no %s outbound found", name, tag)
+			}
+		}
+	}
+
+	full, err := BuildConfig([]model.Server{sampleReality("a", "1.1.1.1")}, Defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("full", full)
+
+	opts := Defaults()
+	opts.ProxyConnMode = true
+	pc, err := BuildConfig([]model.Server{sampleReality("a", "1.1.1.1")}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("proxy-conn", pc)
+}

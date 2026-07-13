@@ -249,9 +249,16 @@ func BuildConfig(servers []model.Server, opts Options) (*Config, error) {
 		cfg.Outbounds = append(cfg.Outbounds, *ob)
 		tags = append(tags, tag)
 	}
+	// direct/block carry the same SO_MARK (selfMark) as the server outbounds.
+	// In TPROXY mode this matters: traffic Xray routes to freedom (notably the
+	// split-tunnel direct catch-all) then egresses on a marked socket that the
+	// capture chain RETURNs early — without the mark that re-dialed direct
+	// traffic is mishandled by the transparent-proxy rules and blackholes, which
+	// is the "with a route set, everything else dies" report. Matches XKeen canon
+	// (every outbound marked), and is harmless in proxy-conn mode.
 	cfg.Outbounds = append(cfg.Outbounds,
-		Outbound{Tag: "direct", Protocol: "freedom"},
-		Outbound{Tag: "block", Protocol: "blackhole"},
+		Outbound{Tag: "direct", Protocol: "freedom", StreamSettings: &StreamSettings{Sockopt: &Sockopt{Mark: selfMark}}},
+		Outbound{Tag: "block", Protocol: "blackhole", StreamSettings: &StreamSettings{Sockopt: &Sockopt{Mark: selfMark}}},
 	)
 
 	// Routing
@@ -335,8 +342,8 @@ func buildProxyConnConfig(server model.Server, opts Options) (*Config, error) {
 		}},
 		Outbounds: []Outbound{
 			*ob,
-			{Tag: "direct", Protocol: "freedom"},
-			{Tag: "block", Protocol: "blackhole"},
+			{Tag: "direct", Protocol: "freedom", StreamSettings: &StreamSettings{Sockopt: &Sockopt{Mark: selfMark}}},
+			{Tag: "block", Protocol: "blackhole", StreamSettings: &StreamSettings{Sockopt: &Sockopt{Mark: selfMark}}},
 		},
 		Routing: &Routing{
 			DomainStrategy: "IPIfNonMatch",

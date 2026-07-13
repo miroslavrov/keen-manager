@@ -15,6 +15,26 @@
 //     `keen-manager route reapply`; HookScript returns that hook's contents.
 //   - It is DISABLED by default. keen-manager is fully functional (config
 //     generation, health, failover, nfqws, local SOCKS proxy) without it.
+//
+// TPROXY CANON — the capture chain mirrors the proven XKeen/Xray transparent-
+// proxy ruleset, which is what makes captured traffic actually reach the tunnel
+// rather than blackholing (the "connects but only local IPs work" report):
+//
+//   - every iptables call passes `-w` so KeeneticOS's concurrent ndm rewrites
+//     can't fail us with "another app is holding the xtables lock" (exit 4);
+//   - `-m socket --transparent` diverts packets that already belong to one of
+//     Xray's transparent sockets (replies + mid-stream) straight to local
+//     delivery instead of re-TPROXY'ing or dropping them;
+//   - `-m conntrack --ctstate DNAT,INVALID -j RETURN` leaves port-forwards and
+//     invalid packets alone;
+//   - the TPROXY target sets `--on-ip 127.0.0.1` so delivery is to the local
+//     Xray listener regardless of the incoming interface;
+//   - the policy route matches the fwmark with a mask so a mark KeeneticOS may
+//     have already set in other bits doesn't defeat the exact-match rule.
+//
+// The two optional-module rules (`-m socket`, `-m conntrack`) are best-effort:
+// on an iptables build lacking xt_socket/xt_conntrack they are skipped with a
+// log line and capture still works for new connections.
 package route
 
 import (
@@ -33,6 +53,12 @@ const (
 	// OUTPUT so removal is a single flush+delete of a chain we own.
 	ChainPre = "KEENMGR_TPROXY"
 	ChainKS  = "KEENMGR_KILL"
+
+	// iptWaitSeconds is how long iptables blocks for the xtables lock before
+	// failing. KeeneticOS's ndm rewrites iptables on every topology change, so a
+	// no-wait call races it and dies with exit 4 mid-apply, stranding a
+	// half-installed chain. 5s comfortably outlasts an ndm rewrite.
+	iptWaitSeconds = "5"
 )
 
 // DefaultBypass are destination ranges that must never be sent through the
@@ -75,6 +101,25 @@ func New(p platform.Paths, r *platform.Runner) *Manager {
 	}
 }
 
+// iptRule is one rule in a private chain. A bestEffort rule is applied with Run
+// (its failure is logged, not fatal) so an iptables build lacking an optional
+// match module (xt_socket / xt_conntrack) degrades to plain capture instead of
+// aborting the whole tunnel bring-up.
+type iptRule struct {
+	args       []string
+	bestEffort bool
+}
+
+// iptArgs prepends the xtables lock-wait flag to an iptables argument list. A
+// fresh slice is returned each call (never aliases a shared backing array).
+func iptArgs(args ...string) []string {
+	return append([]string{"-w", iptWaitSeconds}, args...)
+}
+
+// markMask is the fwmark match in mask form ("0x2333/0x2333") so only our bits
+// are compared — a mark KeeneticOS set in other bits won't defeat the match.
+func (m *Manager) markMask() string { return fmt.Sprintf("0x%x/0x%x", Mark, Mark) }
+
 // EnableTProxy installs the policy route + TPROXY capture rules.
 func (m *Manager) EnableTProxy() error {
 	if err := m.installPolicyRoute(); err != nil {
@@ -109,15 +154,18 @@ func (m *Manager) DisableKillSwitch() error {
 }
 
 func (m *Manager) installPolicyRoute() error {
-	mark := fmt.Sprintf("0x%x", Mark)
+	mm := m.markMask()
+	legacy := fmt.Sprintf("0x%x", Mark) // pre-rc.8 unmasked form
 	table := fmt.Sprint(Table)
 
 	// `ip rule add` ALWAYS appends, even an identical rule — so a naive add on
 	// every Reapply() (the ndm hook fires on each topology change) would leak
-	// duplicate rules indefinitely. Delete any existing copy first, then add
-	// exactly one. The del is best-effort (errors when absent, which is fine).
-	_ = m.Runner.Run(m.IPBin, "rule", "del", "fwmark", mark, "lookup", table)
-	if err := m.Runner.MustRun(m.IPBin, "rule", "add", "fwmark", mark, "lookup", table); err != nil {
+	// duplicate rules indefinitely. Delete any existing copy first (both the
+	// current masked form and the legacy unmasked one an older build may have
+	// left), then add exactly one. The dels are best-effort (error when absent).
+	_ = m.Runner.Run(m.IPBin, "rule", "del", "fwmark", mm, "lookup", table)
+	_ = m.Runner.Run(m.IPBin, "rule", "del", "fwmark", legacy, "lookup", table)
+	if err := m.Runner.MustRun(m.IPBin, "rule", "add", "fwmark", mm, "lookup", table); err != nil {
 		// Tolerate "exists" in case a concurrent add already installed it.
 		if !strings.Contains(err.Error(), "exists") {
 			return fmt.Errorf("ip rule add: %w", err)
@@ -135,68 +183,102 @@ func (m *Manager) installPolicyRoute() error {
 }
 
 func (m *Manager) removePolicyRoute() error {
-	_ = m.Runner.Run(m.IPBin, "rule", "del", "fwmark", fmt.Sprintf("0x%x", Mark), "lookup", fmt.Sprint(Table))
-	_ = m.Runner.Run(m.IPBin, "route", "flush", "table", fmt.Sprint(Table))
+	table := fmt.Sprint(Table)
+	_ = m.Runner.Run(m.IPBin, "rule", "del", "fwmark", m.markMask(), "lookup", table)
+	_ = m.Runner.Run(m.IPBin, "rule", "del", "fwmark", fmt.Sprintf("0x%x", Mark), "lookup", table)
+	_ = m.Runner.Run(m.IPBin, "route", "flush", "table", table)
 	return nil
 }
 
 // tproxyRules are the mangle-table rules that capture LAN traffic into Xray's
-// TPROXY inbound. They run inside our private chain ChainPre.
-func (m *Manager) tproxyRules() [][]string {
-	rules := [][]string{}
-	// Never capture Xray's own egress (marked with SelfMark).
-	rules = append(rules, []string{"-m", "mark", "--mark", fmt.Sprint(m.SelfMark), "-j", "RETURN"})
+// TPROXY inbound. They run inside our private chain ChainPre, in this order:
+// divert established transparent sockets, skip DNAT/invalid, skip our own
+// egress and the bypass ranges, then TPROXY everything else.
+func (m *Manager) tproxyRules() []iptRule {
+	mm := m.markMask()
+	rules := []iptRule{
+		// Leave port-forwarded (DNAT) and invalid packets alone — they are not
+		// LAN egress and must not be captured. Best-effort: needs xt_conntrack.
+		{args: []string{"-m", "conntrack", "--ctstate", "DNAT,INVALID", "-j", "RETURN"}, bestEffort: true},
+		// Packets that already belong to one of Xray's transparent sockets
+		// (replies + mid-stream of an established capture): (re)mark for local
+		// delivery and accept, so they reach the existing socket instead of being
+		// re-TPROXY'd or lost. This is the XKeen "-m socket --transparent" divert;
+		// its absence is the classic "handshake OK but no data / only local IPs
+		// work" TPROXY failure. Best-effort: needs xt_socket.
+		{args: []string{"-p", "tcp", "-m", "socket", "--transparent", "-j", "MARK", "--set-mark", mm}, bestEffort: true},
+		{args: []string{"-p", "tcp", "-m", "socket", "--transparent", "-j", "ACCEPT"}, bestEffort: true},
+		{args: []string{"-p", "udp", "-m", "socket", "--transparent", "-j", "MARK", "--set-mark", mm}, bestEffort: true},
+		{args: []string{"-p", "udp", "-m", "socket", "--transparent", "-j", "ACCEPT"}, bestEffort: true},
+		// Never capture Xray's own egress (marked with SelfMark).
+		{args: []string{"-m", "mark", "--mark", fmt.Sprint(m.SelfMark), "-j", "RETURN"}},
+	}
 	// Never capture bypassed destinations (LAN, router, reserved ranges).
 	for _, cidr := range m.Bypass {
-		rules = append(rules, []string{"-d", cidr, "-j", "RETURN"})
+		rules = append(rules, iptRule{args: []string{"-d", cidr, "-j", "RETURN"}})
 	}
-	// TPROXY the rest (tcp + udp) to Xray, tagging with our fwmark.
+	// TPROXY the rest (tcp + udp) to Xray's transparent inbound on the local
+	// listener, tagging with our fwmark. --on-ip 127.0.0.1 pins delivery to the
+	// local Xray socket regardless of which interface the packet arrived on
+	// (the default is the incoming interface IP, which misdelivers on a router).
 	for _, proto := range []string{"tcp", "udp"} {
-		rules = append(rules, []string{
+		rules = append(rules, iptRule{args: []string{
 			"-p", proto, "-j", "TPROXY",
+			"--on-ip", "127.0.0.1",
 			"--on-port", fmt.Sprint(m.TProxyPort),
-			"--tproxy-mark", fmt.Sprintf("0x%x/0x%x", Mark, Mark),
-		})
+			"--tproxy-mark", mm,
+		}})
 	}
 	return rules
 }
 
-func (m *Manager) killSwitchRules() [][]string {
-	rules := [][]string{}
+func (m *Manager) killSwitchRules() []iptRule {
+	mm := m.markMask()
+	rules := []iptRule{}
 	for _, cidr := range m.Bypass {
-		rules = append(rules, []string{"-d", cidr, "-j", "RETURN"})
+		rules = append(rules, iptRule{args: []string{"-d", cidr, "-j", "RETURN"}})
 	}
 	// Allow anything already marked for the tunnel; drop the rest.
-	rules = append(rules, []string{"-m", "mark", "--mark", fmt.Sprintf("0x%x/0x%x", Mark, Mark), "-j", "RETURN"})
-	rules = append(rules, []string{"-j", "DROP"})
+	rules = append(rules, iptRule{args: []string{"-m", "mark", "--mark", mm, "-j", "RETURN"}})
+	rules = append(rules, iptRule{args: []string{"-j", "DROP"}})
 	return rules
 }
 
 // applyChain creates (add=true) or tears down (add=false) a private chain and
 // the jump into it. Table is "mangle" for TPROXY, "filter"/FORWARD for kill.
-func (m *Manager) applyChain(chain string, rules [][]string, add bool) error {
+// Every iptables call carries -w so a concurrent ndm rewrite can't fail it.
+func (m *Manager) applyChain(chain string, rules []iptRule, add bool) error {
 	table, hook := "mangle", "PREROUTING"
 	if chain == ChainKS {
 		table, hook = "filter", "FORWARD"
 	}
 	if add {
 		// Fresh chain: create, flush, fill, then jump from the hook.
-		_ = m.Runner.Run(m.IPTables, "-t", table, "-N", chain)
-		_ = m.Runner.Run(m.IPTables, "-t", table, "-F", chain)
+		_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-N", chain)...)
+		_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-F", chain)...)
 		for _, r := range rules {
-			args := append([]string{"-t", table, "-A", chain}, r...)
+			args := iptArgs(append([]string{"-t", table, "-A", chain}, r.args...)...)
+			if r.bestEffort {
+				// Optional-module rule: log and continue on failure so a build
+				// without xt_socket/xt_conntrack still captures new connections.
+				if res := m.Runner.Run(m.IPTables, args...); res.Err != nil && m.Runner.Log != nil {
+					m.Runner.Log(fmt.Sprintf("keen-manager: optional TPROXY rule skipped (%v): %s",
+						res.Err, strings.Join(r.args, " ")))
+				}
+				continue
+			}
 			if err := m.Runner.MustRun(m.IPTables, args...); err != nil {
 				return err
 			}
 		}
 		// Insert the jump once (delete any prior copy first for idempotency).
-		_ = m.Runner.Run(m.IPTables, "-t", table, "-D", hook, "-j", chain)
-		return m.Runner.MustRun(m.IPTables, "-t", table, "-I", hook, "-j", chain)
+		_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-D", hook, "-j", chain)...)
+		return m.Runner.MustRun(m.IPTables, iptArgs("-t", table, "-I", hook, "-j", chain)...)
 	}
 	// Teardown: remove the jump, flush and delete the chain.
-	_ = m.Runner.Run(m.IPTables, "-t", table, "-D", hook, "-j", chain)
-	_ = m.Runner.Run(m.IPTables, "-t", table, "-F", chain)
-	_ = m.Runner.Run(m.IPTables, "-t", table, "-X", chain)
+	_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-D", hook, "-j", chain)...)
+	_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-F", chain)...)
+	_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-X", chain)...)
 	return nil
 }
 
