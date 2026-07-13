@@ -218,14 +218,25 @@ func (e *Engine) reconcileProxyIface() {
 // keen-manager cleans up after itself. It keeps the interface while any Xray
 // connection still exists — the exit point is shared, not per-connection.
 func (e *Engine) teardownManagedProxyIfaceIfUnused() {
-	name := e.managedProxyIface()
-	if name == "" {
+	if e.managedProxyIface() == "" {
 		return
 	}
 	for _, c := range e.store.Get().Connections {
 		if c.Type == model.ConnXray {
 			return // still in use by at least one Xray connection
 		}
+	}
+	e.teardownManagedProxyIface()
+}
+
+// teardownManagedProxyIface removes the shared Xray Proxy interface from the
+// router unconditionally and clears its recorded name. Callers that must keep
+// it while Xray connections remain should use teardownManagedProxyIfaceIfUnused;
+// the factory reset (which drops every connection) uses this directly.
+func (e *Engine) teardownManagedProxyIface() {
+	name := e.managedProxyIface()
+	if name == "" {
+		return
 	}
 	if e.keenetic != nil && !e.runner.DryRun {
 		ctx, cancel := context.WithTimeout(e.baseCtx(), 30*time.Second)
@@ -234,7 +245,7 @@ func (e *Engine) teardownManagedProxyIfaceIfUnused() {
 			e.Logf("proxy-conn: could not remove %s: %v", name, err)
 		} else {
 			_ = e.keenetic.Save(ctx)
-			e.Logf("proxy-conn: removed %s (no Xray connections remain)", name)
+			e.Logf("proxy-conn: removed %s", name)
 		}
 	}
 	e.clearManagedProxyIface()

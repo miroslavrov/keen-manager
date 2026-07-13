@@ -92,6 +92,18 @@ func (s *Store) Mutate(fn func(*model.State) error) error {
 	return s.save()
 }
 
+// Reset replaces the entire persisted document with fresh defaults — a factory
+// reset. save() snapshots the pre-reset state.json into the backup directory
+// first, so a reset is recoverable (the previous config is not destroyed, just
+// superseded). The in-memory-only auth hash is dropped with the rest; the
+// engine clears the vault copy separately.
+func (s *Store) Reset() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state = DefaultState()
+	return s.save()
+}
+
 // save writes atomically and keeps a rolling backup of the previous file.
 func (s *Store) save() error {
 	data, err := json.MarshalIndent(s.state, "", "  ")

@@ -51,6 +51,8 @@ func main() {
 		cmdPasswd(rest)
 	case "auth":
 		cmdAuth(rest)
+	case "reset":
+		cmdReset(rest)
 	case "install-hook":
 		eng := openEngine()
 		if err := eng.InstallHook(); err != nil {
@@ -105,6 +107,8 @@ COMMANDS:
   passwd <new-password>        set the web UI password and enable auth
   auth disable                 turn off the web UI login (recover from a lockout)
   auth status                  show whether the web UI login is enabled
+  reset --yes                  factory reset: wipe ALL settings + secrets and
+                               tear down the managed tunnel/interfaces
   connector show               print the master connector (VPN egress) state
   connector on|off             master switch: turn the whole VPN egress on/off
                                (off = LAN goes direct; per-route toggles are separate)
@@ -496,6 +500,28 @@ func cmdAuth(args []string) {
 	default:
 		fatal("usage: keen-manager auth <disable|status>")
 	}
+}
+
+func cmdReset(args []string) {
+	confirmed := false
+	for _, a := range args {
+		switch strings.ToLower(a) {
+		case "--yes", "-y", "yes", "confirm":
+			confirmed = true
+		}
+	}
+	if !confirmed {
+		fatal("this wipes ALL keen-manager settings — connections, subscriptions, " +
+			"routes, failover, DPI bypass and stored credentials — and tears down " +
+			"the managed tunnel/interfaces.\nre-run to confirm: keen-manager reset --yes")
+	}
+	eng := openEngine()
+	if err := eng.ResetAll(); err != nil {
+		fatal("reset: %v", err)
+	}
+	fmt.Println("all settings reset to defaults.")
+	fmt.Println("restart the service so a running daemon picks it up cleanly:")
+	fmt.Println("  /opt/etc/init.d/S99keen-manager restart")
 }
 
 // ----- helpers -----

@@ -132,6 +132,16 @@ func (v *vault) delete(connID string) {
 	}
 }
 
+// reset clears every stored server secret and the web UI auth hash, then
+// persists the empty vault. Used by the factory reset (Engine.ResetAll).
+func (v *vault) reset() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.Servers = map[string]storedServer{}
+	v.Auth = vaultAuth{}
+	return v.save()
+}
+
 // authHash returns the persisted web UI password hash ("" when unset).
 func (v *vault) authHash() string {
 	v.mu.Lock()

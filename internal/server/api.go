@@ -81,6 +81,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Settings.
 	mux.HandleFunc("GET /api/settings", s.requireAuth(s.handleSettings))
 	mux.HandleFunc("PUT /api/settings", s.requireAuth(s.handleSaveSettings))
+	// Factory reset — wipe all keen-manager configuration back to defaults.
+	mux.HandleFunc("POST /api/settings/reset", s.requireAuth(s.handleResetSettings))
 
 	// Kill switch.
 	mux.HandleFunc("POST /api/killswitch", s.requireAuth(s.handleKillSwitch))
@@ -553,6 +555,19 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.eng.SaveSettings(fields); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeOK(w)
+}
+
+// handleResetSettings performs a factory reset: it tears down keen-manager's
+// device-side artifacts and wipes all persisted configuration and secrets back
+// to defaults. Destructive and irreversible from the UI's point of view (the
+// previous state.json is snapshotted to the backup dir on the router), so the
+// web client gates it behind an explicit confirmation.
+func (s *Server) handleResetSettings(w http.ResponseWriter, r *http.Request) {
+	if err := s.eng.ResetAll(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeOK(w)
