@@ -202,6 +202,42 @@ chmod +x /opt/etc/init.d/S99keen-manager
 tail -f /opt/var/log/keen-manager.log     # daemon log
 ```
 
+### Reset all settings
+
+Wipes **every** keen-manager setting — connections, subscriptions, routes,
+failover, DPI bypass and the web password — and tears down the managed tunnel and
+router interfaces, returning the router to a clean first-run state. The previous
+`state.json` is snapshotted into `/opt/etc/keen-manager/backups` first, so a reset
+is recoverable; the `nfqws2` package and its lists are left untouched.
+
+- **Web UI:** Settings → *Danger zone* → **Reset everything** (asks to confirm).
+- **CLI:** `keen-manager reset --yes`
+
+It is the in-process equivalent of the manual recovery `stop → rm -rf
+/opt/etc/keen-manager → start`.
+
+### xray won't start ("exec format error")
+
+`xray config invalid: fork/exec /opt/sbin/xray: exec format error` means the xray
+binary at `/opt/sbin/xray` is the wrong CPU architecture (or corrupt) — it cannot
+run on this router. keen-manager now verifies the binary and **automatically
+reinstalls the correct build** for the device on the next activation.
+
+If your ISP's DPI resets GitHub's release CDN so the auto-download can't complete
+(a common Keenetic situation), install xray **offline**: put a matching build on
+the router and point keen-manager at it via `KEEN_XRAY_URL`, then restart the
+service so the daemon re-provisions:
+
+```sh
+# in the daemon's environment (e.g. before starting the service)
+export KEEN_XRAY_URL="file:///opt/tmp/Xray-linux-arm64-v8a.zip"
+/opt/etc/init.d/S99keen-manager restart
+```
+
+`KEEN_XRAY_URL` accepts an `http(s)://` or `file://` URL, pointing at either an
+Xray-core release `.zip` or a raw `xray` binary. (`KEEN_XRAY_VERSION` still pins
+the version for the default GitHub download.)
+
 ### Uninstall
 
 Stops the service and removes the binary, init script, and ndm hook. Config and
@@ -505,6 +541,43 @@ chmod +x /opt/etc/init.d/S99keen-manager
 /opt/etc/init.d/S99keen-manager status
 tail -f /opt/var/log/keen-manager.log     # лог демона
 ```
+
+### Сброс всех настроек
+
+Стирает **все** настройки keen-manager — подключения, подписки, маршруты,
+фейловер, обход DPI и пароль веб-интерфейса — и снимает управляемый туннель и
+интерфейсы роутера, возвращая его к чистому состоянию, как после установки.
+Предыдущий `state.json` сначала сохраняется в `/opt/etc/keen-manager/backups`,
+поэтому сброс обратим; пакет `nfqws2` и его списки не трогаются.
+
+- **Веб-интерфейс:** Настройки → *Опасная зона* → **Сбросить всё** (с подтверждением).
+- **CLI:** `keen-manager reset --yes`
+
+Это внутрипроцессный эквивалент ручного восстановления `stop → rm -rf
+/opt/etc/keen-manager → start`.
+
+### xray не запускается («exec format error»)
+
+`xray config invalid: fork/exec /opt/sbin/xray: exec format error` означает, что
+бинарь xray в `/opt/sbin/xray` не той архитектуры процессора (или битый) — он не
+может выполниться на этом роутере. Теперь keen-manager проверяет бинарь и
+**автоматически переустанавливает правильную сборку** для устройства при
+следующей активации.
+
+Если DPI провайдера рвёт CDN релизов GitHub и авто-докачка не проходит (частая
+ситуация на Keenetic), поставь xray **офлайн**: положи подходящую сборку на роутер
+и укажи её keen-manager через `KEEN_XRAY_URL`, затем перезапусти сервис, чтобы
+демон переустановил бинарь:
+
+```sh
+# в окружении демона (например, перед запуском сервиса)
+export KEEN_XRAY_URL="file:///opt/tmp/Xray-linux-arm64-v8a.zip"
+/opt/etc/init.d/S99keen-manager restart
+```
+
+`KEEN_XRAY_URL` принимает `http(s)://` или `file://`-URL, указывающий либо на
+релизный `.zip` Xray-core, либо на «сырой» бинарь `xray`. (`KEEN_XRAY_VERSION`
+по-прежнему пинит версию для стандартной докачки с GitHub.)
 
 ### Удаление
 
