@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
+  AlertTriangle,
   Cpu,
   Info,
   KeyRound,
@@ -10,9 +11,11 @@ import {
   LogOut,
   Save,
   Server as ServerIcon,
+  Trash2,
 } from 'lucide-react'
 
 import { PageHeader } from '@/components/PageHeader'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -141,6 +144,25 @@ export function SettingsPage() {
     },
   })
 
+  const [resetOpen, setResetOpen] = React.useState(false)
+  const resetMutation = useMutation({
+    mutationFn: () => api.resetSettings(),
+    onSuccess: () => {
+      setResetOpen(false)
+      toast({
+        variant: 'success',
+        title: t('settings.resetDone'),
+        description: t('settings.resetDoneDesc'),
+      })
+      // Everything the cache held is gone on the daemon side; drop it and land
+      // on a clean dashboard (auth is now off, so no login is required).
+      queryClient.clear()
+      navigate('/', { replace: true })
+    },
+    onError: () =>
+      toast({ variant: 'error', title: t('settings.resetError') }),
+  })
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -169,6 +191,7 @@ export function SettingsPage() {
           <Skeleton className="h-96" />
         </div>
       ) : (
+        <>
         <div className="grid gap-4 lg:grid-cols-2">
           {/* Web UI */}
           <Card>
@@ -432,6 +455,49 @@ export function SettingsPage() {
             />
           </div>
         </div>
+
+        {/* Danger zone — factory reset */}
+        <Card className="border-destructive/40">
+          <CardHeader className="flex-row items-center gap-2 space-y-0">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+            <CardTitle className="text-destructive">
+              {t('settings.dangerZone')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <Label>{t('settings.resetAll')}</Label>
+              <p className="max-w-xl text-xs text-muted-foreground">
+                {t('settings.resetAllDesc')}
+              </p>
+            </div>
+            <Button
+              variant="destructive"
+              onClick={() => setResetOpen(true)}
+              disabled={resetMutation.isPending}
+              className="shrink-0 gap-1.5"
+            >
+              {resetMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              {t('settings.resetAllButton')}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <ConfirmDialog
+          open={resetOpen}
+          onOpenChange={setResetOpen}
+          title={t('settings.resetConfirmTitle')}
+          description={t('settings.resetConfirmDesc')}
+          confirmLabel={t('settings.resetConfirmButton')}
+          destructive
+          loading={resetMutation.isPending}
+          onConfirm={() => resetMutation.mutate()}
+        />
+        </>
       )}
     </div>
   )

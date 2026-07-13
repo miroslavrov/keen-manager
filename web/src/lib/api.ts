@@ -496,6 +496,14 @@ export const api = {
       { ok: true },
     ),
 
+  // Factory reset — wipe ALL configuration + secrets back to defaults and tear
+  // down the managed tunnel/interfaces. Destructive; gate behind a confirm.
+  resetSettings: () =>
+    withOk<Ok>(
+      () => request('/settings/reset', { method: 'POST' }),
+      { ok: true },
+    ),
+
   // ---- master connector switch (whole VPN egress on/off) ----
   setConnector: (enabled: boolean) =>
     withOk<Ok>(

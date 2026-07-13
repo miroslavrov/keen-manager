@@ -59,6 +59,19 @@ export const settings = {
     daemonVersion: 'Daemon version',
     kernelOs: 'Kernel / OS',
     daemonUptime: 'Daemon uptime',
+    dangerZone: 'Danger zone',
+    resetAll: 'Reset all settings',
+    resetAllDesc:
+      'Wipe every keen-manager setting — connections, subscriptions, routes, failover, DPI bypass and the web password — and tear down the managed tunnel and router interfaces. The router returns to a clean, first-run state. The nfqws2 package and its lists are left untouched.',
+    resetAllButton: 'Reset everything',
+    resetConfirmTitle: 'Reset all settings?',
+    resetConfirmDesc:
+      'This erases all connections, subscriptions, routes, failover, DPI bypass and the web password, and brings down the active tunnel. It cannot be undone from here (a backup of the previous config is kept on the router). Continue?',
+    resetConfirmButton: 'Yes, reset everything',
+    resetting: 'Resetting…',
+    resetDone: 'All settings reset',
+    resetDoneDesc: 'keen-manager is back to its first-run state.',
+    resetError: 'Could not reset settings',
   },
   ru: {
     title: 'Настройки',
@@ -119,5 +132,18 @@ export const settings = {
     daemonVersion: 'Версия демона',
     kernelOs: 'Ядро / ОС',
     daemonUptime: 'Аптайм демона',
+    dangerZone: 'Опасная зона',
+    resetAll: 'Сбросить все настройки',
+    resetAllDesc:
+      'Стереть все настройки keen-manager — подключения, подписки, маршруты, фейловер, обход DPI и пароль веб-интерфейса — и снять управляемый туннель и интерфейсы роутера. Роутер вернётся к чистому состоянию, как после установки. Пакет nfqws2 и его списки не трогаются.',
+    resetAllButton: 'Сбросить всё',
+    resetConfirmTitle: 'Сбросить все настройки?',
+    resetConfirmDesc:
+      'Это удалит все подключения, подписки, маршруты, фейловер, обход DPI и пароль веб-интерфейса, а также снимет активный туннель. Отменить отсюда нельзя (резервная копия предыдущей конфигурации остаётся на роутере). Продолжить?',
+    resetConfirmButton: 'Да, сбросить всё',
+    resetting: 'Сброс…',
+    resetDone: 'Все настройки сброшены',
+    resetDoneDesc: 'keen-manager вернулся к состоянию после установки.',
+    resetError: 'Не удалось сбросить настройки',
   },
 }
