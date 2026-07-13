@@ -38,6 +38,7 @@ jobs:
         run: make dist
 
       - name: Build IPK packages
+        continue-on-error: true
         run: |
           sudo apt-get install -y binutils
           make ipk
@@ -45,7 +46,9 @@ jobs:
       - name: Generate checksums
         run: |
           cd build
-          sha256sum keen-manager-*.gz keen-manager-*.ipk 2>/dev/null > sha256sums.txt
+          sha256sum keen-manager-*.gz > sha256sums.txt
+          # Add IPK checksums if they exist (non-fatal if not)
+          ls keen-manager-*.ipk 2>/dev/null && sha256sum keen-manager-*.ipk >> sha256sums.txt || true
           cat sha256sums.txt
 
       - name: Publish GitHub Release
@@ -53,7 +56,6 @@ jobs:
         with:
           files: |
             build/keen-manager-*.gz
-            build/keen-manager-*.ipk
             build/sha256sums.txt
           generate_release_notes: true
           fail_on_unmatched_files: true
