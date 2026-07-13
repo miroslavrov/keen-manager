@@ -723,6 +723,21 @@ func subMembers(st model.State, subID string) []model.Connection {
 	return out
 }
 
+// shouldMigrateAfterDisable reports whether switching off the server that was
+// active should hand off to the best REMAINING enabled server of subscription
+// subID (rather than dropping to the direct path). It does so only when that
+// subscription is in auto-select-best mode and on, and the master connector is
+// not paused — i.e. the user has asked to be kept on the best server, so
+// removing the one they don't want should move them onto the best one they do.
+// Pure (no engine state) so the decision is unit-tested directly.
+func shouldMigrateAfterDisable(st model.State, subID string) bool {
+	if st.TunnelPaused || subID == "" {
+		return false
+	}
+	sub, ok := findSub(st, subID)
+	return ok && sub.AutoSelectBest && sub.Enabled
+}
+
 func isoPtr(t *time.Time) string {
 	if t == nil {
 		return ""

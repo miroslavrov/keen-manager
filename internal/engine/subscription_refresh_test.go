@@ -211,6 +211,46 @@ func TestSubMembersExcludesDisabled(t *testing.T) {
 	}
 }
 
+// TestShouldMigrateAfterDisable: switching off the active server hands off to
+// the best remaining server only when the subscription is auto-best + on and the
+// connector is not paused; otherwise disabling just drops (existing behaviour).
+func TestShouldMigrateAfterDisable(t *testing.T) {
+	base := func() model.State {
+		return model.State{
+			Subscriptions: []model.Subscription{{ID: "s1", Enabled: true, AutoSelectBest: true}},
+		}
+	}
+
+	if !shouldMigrateAfterDisable(base(), "s1") {
+		t.Error("auto-best + enabled stream + connector on should migrate")
+	}
+
+	off := base()
+	off.Subscriptions[0].AutoSelectBest = false
+	if shouldMigrateAfterDisable(off, "s1") {
+		t.Error("auto-best OFF must not migrate (plain disable drops to direct)")
+	}
+
+	streamOff := base()
+	streamOff.Subscriptions[0].Enabled = false
+	if shouldMigrateAfterDisable(streamOff, "s1") {
+		t.Error("a disabled subscription stream must not migrate")
+	}
+
+	paused := base()
+	paused.TunnelPaused = true
+	if shouldMigrateAfterDisable(paused, "s1") {
+		t.Error("a paused connector must not migrate")
+	}
+
+	if shouldMigrateAfterDisable(base(), "") {
+		t.Error("a subscription-less connection must not migrate")
+	}
+	if shouldMigrateAfterDisable(base(), "nope") {
+		t.Error("an unknown subscription must not migrate")
+	}
+}
+
 func ids(cs []model.Connection) []string {
 	out := make([]string, len(cs))
 	for i, c := range cs {

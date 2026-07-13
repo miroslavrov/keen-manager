@@ -207,6 +207,15 @@ func (e *Engine) CreateConnection(typ model.ConnType, name, awgConf, shareLink s
 
 // UpdateConnection changes mutable fields (name, enabled, fallback target).
 func (e *Engine) UpdateConnection(id string, fields map[string]any) (ConnView, error) {
+	// Capture pre-mutation facts needed to decide on an auto-best hand-off: was
+	// this the active server, and which subscription does it belong to?
+	pre := e.store.Get()
+	preConn, _ := findConn(pre, id)
+	disablingActive := false
+	if v, ok := fields["enabled"].(bool); ok && !v && pre.ActiveConnID == id {
+		disablingActive = true
+	}
+
 	var updated model.Connection
 	err := e.store.Mutate(func(s *model.State) error {
 		for i := range s.Connections {
@@ -236,6 +245,19 @@ func (e *Engine) UpdateConnection(id string, fields map[string]any) (ConnView, e
 		return ConnView{}, err
 	}
 	e.publishState()
+
+	// Switching off the ACTIVE server under an auto-select-best subscription hands
+	// off to the best remaining ENABLED member instead of dropping to the direct
+	// path — so dropping a server you don't want (e.g. your home-country node)
+	// moves you straight onto the fastest one you do want. Async + bounded (via
+	// SelectBest); self-guards on the connector pause and an empty pool.
+	if disablingActive && !e.runner.DryRun && shouldMigrateAfterDisable(e.store.Get(), preConn.SubscriptionID) {
+		go func(subID string) {
+			if _, err := e.SelectBest(subID); err != nil {
+				e.Logf("auto-best: no replacement after disabling the active server: %v", err)
+			}
+		}(preConn.SubscriptionID)
+	}
 	return e.connView(e.store.Get(), updated), nil
 }
 
