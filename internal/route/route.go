@@ -280,39 +280,68 @@ func (m *Manager) killSwitchRules() []iptRule {
 // applyChain creates (add=true) or tears down (add=false) a private chain and
 // the jump into it. Table is "mangle" for TPROXY, "filter"/FORWARD for kill.
 // Every iptables call carries -w so a concurrent ndm rewrite can't fail it.
+//
+// If ndm flushes iptables mid-apply (the chain we just created disappears
+// before we add rules to it), the error is "No chain/target/match by that
+// name." We retry the entire create+fill sequence once — that is enough to
+// outlast a single ndm rewrite.
 func (m *Manager) applyChain(chain string, rules []iptRule, add bool) error {
 	table, hook := "mangle", "PREROUTING"
 	if chain == ChainKS {
 		table, hook = "filter", "FORWARD"
 	}
 	if add {
-		// Fresh chain: create, flush, fill, then jump from the hook.
-		_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-N", chain)...)
-		_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-F", chain)...)
-		for _, r := range rules {
-			args := iptArgs(append([]string{"-t", table, "-A", chain}, r.args...)...)
-			if r.bestEffort {
-				// Optional-module rule: log and continue on failure so a build
-				// without xt_socket/xt_conntrack still captures new connections.
-				if res := m.Runner.Run(m.IPTables, args...); res.Err != nil && m.Runner.Log != nil {
-					m.Runner.Log(fmt.Sprintf("keen-manager: optional TPROXY rule skipped (%v): %s",
-						res.Err, strings.Join(r.args, " ")))
+		for attempt := 0; attempt < 2; attempt++ {
+			err := m.applyChainOnce(chain, rules, table, hook)
+			if err == nil {
+				return nil
+			}
+			// Retry only on the ndm-race "chain vanished" error.
+			if strings.Contains(err.Error(), "No chain/target/match by that name") && attempt == 0 {
+				if m.Runner.Log != nil {
+					m.Runner.Log("keen-manager: iptables chain vanished mid-apply (ndm race) — retrying")
 				}
+				// Clean up any partial state before retrying.
+				_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-D", hook, "-j", chain)...)
+				_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-F", chain)...)
+				_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-X", chain)...)
 				continue
 			}
-			if err := m.Runner.MustRun(m.IPTables, args...); err != nil {
-				return err
-			}
+			return err
 		}
-		// Insert the jump once (delete any prior copy first for idempotency).
-		_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-D", hook, "-j", chain)...)
-		return m.Runner.MustRun(m.IPTables, iptArgs("-t", table, "-I", hook, "-j", chain)...)
+		return fmt.Errorf("iptables chain apply failed after retry (ndm race)")
 	}
 	// Teardown: remove the jump, flush and delete the chain.
 	_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-D", hook, "-j", chain)...)
 	_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-F", chain)...)
 	_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-X", chain)...)
 	return nil
+}
+
+// applyChainOnce creates and fills a private chain in one shot. Called by
+// applyChain, which wraps it with retry logic for ndm races.
+func (m *Manager) applyChainOnce(chain string, rules []iptRule, table, hook string) error {
+	// Fresh chain: create, flush, fill, then jump from the hook.
+	_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-N", chain)...)
+	_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-F", chain)...)
+	for _, r := range rules {
+		args := iptArgs(append([]string{"-t", table, "-A", chain}, r.args...)...)
+		if r.bestEffort {
+			// Optional-module rule: log and continue on failure so a build
+			// without xt_socket/xt_conntrack still captures new connections.
+			if res := m.Runner.Run(m.IPTables, args...); res.Err != nil && m.Runner.Log != nil {
+				m.Runner.Log(fmt.Sprintf("keen-manager: optional TPROXY rule skipped (%v): %s",
+					res.Err, strings.Join(r.args, " ")))
+			}
+			continue
+		}
+		if err := m.Runner.MustRun(m.IPTables, args...); err != nil {
+			return err
+		}
+	}
+	// Insert the jump once (delete any prior copy first for idempotency).
+	_ = m.Runner.Run(m.IPTables, iptArgs("-t", table, "-D", hook, "-j", chain)...)
+	return m.Runner.MustRun(m.IPTables, iptArgs("-t", table, "-I", hook, "-j", chain)...)
 }
 
 // HookScript returns the contents of the ndm netfilter.d hook that re-applies

@@ -9,7 +9,7 @@ keen-manager brings **AmneziaWG**, **Xray** (with subscription support), and
 with automatic best-location selection, health checks, and **fallback chains** so
 your connection stays up even when a server is blocked or an operator rotates IPs.
 
-> **Status: beta.** The full stack is implemented and ships as a single
+> **Status: beta (rc.10).** The full stack is implemented and ships as a single
 > self-contained binary: the Go core (subscription parsing, Xray config
 > generation, AWG config handling, health & failover logic), the daemon
 > (REST/JSON API + SSE + embedded web UI), the CLI, and all seven web UI pages.
@@ -91,8 +91,38 @@ tproxy, safety model, arch detection).
 
 ## Install (Keenetic + Entware)
 
-> Requires a Keenetic router with USB/NAND storage, **Entware (opkg)**, and the
-> firmware components *IPv6 protocol* and *Netfilter subsystem kernel modules*.
+### Prerequisites
+
+1. **Keenetic router** with USB/NAND storage and **Entware (opkg)** installed.
+   [Entware install guide →](https://github.com/Entware/Entware/wiki)
+
+2. **Firmware components** (install via Keenetic web UI → *General settings* →
+   *Component options*):
+   - **IPv6 protocol** — needed for Xray to connect to servers that resolve to
+     IPv6 (common with European VPN providers; without it, IPv6-only servers
+     are unreachable).
+   - **Netfilter subsystem kernel modules** — needed for TPROXY capture and
+     the kill-switch (provides `xt_TPROXY`, `xt_socket`, `xt_conntrack`,
+     `xt_mark`).
+
+3. **Entware packages** (on the router via SSH):
+   ```sh
+   opkg update
+   opkg install curl           # download (auto-installed by the one-liner)
+   opkg install ip-full        # full-featured iproute2 (preferred for policy routing)
+   ```
+   The installer auto-installs `curl` if missing. `ip-full` is optional but
+   recommended — without it, keen-manager falls back to the firmware's limited
+   `ip` binary (some policy-routing features may not work).
+
+4. **Managed components** (keen-manager drives these but does not bundle them):
+
+   | Component | What it does | How to install |
+   |-----------|-------------|----------------|
+   | **xray-core** | VLESS/Reality/VMess/Trojan/SS VPN tunnel | Auto-downloaded by keen-manager on first activation (from GitHub). If your ISP blocks GitHub CDN, see [Offline xray install](#xray-wont-start-exec-format-error). |
+   | **nfqws2** | DPI bypass (strategy-based packet manipulation) | Install separately: see [`nfqws2-keenetic`](https://github.com/nfqws/nfqws2-keenetic). keen-manager detects and manages it if present. |
+   | **tpws** | Socket desync proxy for routable DPI bypass | `opkg install tpws` — only needed if you want the *Bypass* page's routable ProxyN exit point. Without it, nfqws2 still works; tpws is for per-domain routing through a managed proxy interface. |
+   | **AmneziaWG** | WireGuard-based VPN with obfuscation | On firmware 5.1.0+, the native AWG2 kernel modules are used (auto-detected). On older firmware, `awg-quick` from Entware. |
 
 There are two ways to install. **Method A** is the one-liner. Use **Method B**
 when the router can't reach GitHub's release CDN — some ISPs reset the TLS
@@ -134,7 +164,7 @@ machine that *can* reach GitHub (e.g. behind a VPN), then copy them across.
    # matching binary (arm64 shown — swap for your arch). Betas are pre-releases,
    # so the 'latest/download' shortcut does NOT resolve yet — grab the newest tag
    # from the Releases page: https://github.com/miroslavrov/keen-manager/releases
-   TAG=v0.1.0-beta.10   # ← replace with the newest tag listed there
+   TAG=v0.1.0-rc.10   # ← replace with the newest tag from the Releases page
    curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/${TAG}/keen-manager-arm64.gz"
    ```
 
@@ -257,6 +287,41 @@ This only affects the Xray-via-TPROXY fallback (used when the KeeneticOS Proxy
 client component isn't installed); transparent-proxy and kill-switch are opt-in
 and off by default.
 
+### all traffic stopped after enabling VPN
+
+If the entire router loses internet (not just VPN) after activating an Xray
+connection, check:
+
+1. **Kill-switch left on after a crash?** Run on the router:
+   ```sh
+   iptables -L FORWARD -n 2>&1 | grep KEENMGR
+   ```
+   If you see `KEENMGR_KILL`, the kill-switch chain is still active. Remove it:
+   ```sh
+   iptables -D FORWARD -j KEENMGR_KILL 2>/dev/null
+   iptables -F KEENMGR_KILL 2>/dev/null
+   iptables -X KEENMGR_KILL 2>/dev/null
+   ```
+   Then disable the kill-switch in keen-manager (Settings → kill-switch off)
+   before re-activating.
+
+2. **TPROXY rules stuck after a failed activation?**
+   ```sh
+   iptables -t mangle -D PREROUTING -j KEENMGR_TPROXY 2>/dev/null
+   iptables -t mangle -F KEENMGR_TPROXY 2>/dev/null
+   iptables -t mangle -X KEENMGR_TPROXY 2>/dev/null
+   ip rule del fwmark 0x2333/0x2333 lookup 993 2>/dev/null
+   ip route flush table 993 2>/dev/null
+   ```
+
+3. **Connector paused?** In the web UI, make sure the connector toggle is ON.
+   Or via CLI: `keen-manager connector on`.
+
+4. **ndm race during activation?** If you see
+   `No chain/target/match by that name` in the log, ndm flushed iptables
+   mid-apply. rc.10+ retries automatically; on older builds, just re-activate
+   the connection.
+
 ### Uninstall
 
 Stops the service and removes the binary, init script, and ndm hook. Config and
@@ -340,6 +405,11 @@ their own upstreams, under their own terms): the `nfqws2` daemon
 
 - [x] Finish web UI feature pages (dashboard, connections, subscriptions, bypass, failover, logs, settings)
 - [x] Prebuilt release binaries + one-line installer
+- [x] TPROXY capture with XKeen-canonical ruleset (conntrack, socket, mark, bypass)
+- [x] ndm netfilter hook (route reapply after topology change)
+- [x] ndm race retry (chain-vanished during apply → automatic retry)
+- [x] Health loop: SOCKS-first probe for active Xray (handles IPv4 TCP broken on router)
+- [x] TPROXY verify in activation + health loop (SOCKS ok → verify capture chain)
 - [ ] Xray gRPC hot-reload (swap outbounds without a full restart)
 - [ ] Policy-based routing per device group (Keenetic policy fwmark integration)
 - [ ] IPK packaging + hosted opkg feed
@@ -366,11 +436,11 @@ keen-manager объединяет **AmneziaWG**, **Xray** (с поддержко
 **цепочками фолбека**, чтобы соединение оставалось живым, даже когда сервер
 блокируют или оператор меняет IP-адреса.
 
-> **Статус: бета.** Весь стек реализован и поставляется одним самодостаточным
-> бинарём: ядро на Go (разбор подписок, генерация конфигов Xray, работа с
-> конфигами AWG, логика health-check и фолбека), демон (REST/JSON API + SSE +
-> встроенная веб-морда), CLI и все семь страниц интерфейса. Готовые бинари под
-> все архитектуры роутеров опубликованы на странице
+> **Статус: бета (rc.10).** Весь стек реализован и поставляется одним
+> самодостаточным бинарём: ядро на Go (разбор подписок, генерация конфигов Xray,
+> работа с конфигами AWG, логика health-check и фолбека), демон (REST/JSON API
+> + SSE + встроенная веб-морда), CLI и все семь страниц интерфейса. Готовые
+> бинари под все архитектуры роутеров опубликованы на странице
 > [Releases](https://github.com/miroslavrov/keen-manager/releases). Действия на
 > устройстве сделаны безопасно (проверка перед применением, бэкапы, откат), а
 > прозрачный прокси / kill-switch **выключены по умолчанию** — установка не
@@ -450,8 +520,37 @@ keen-manager (один бинарь)
 
 ## Установка (Keenetic + Entware)
 
-> Нужен роутер Keenetic с USB/NAND-накопителем, **Entware (opkg)** и компоненты
-> прошивки *Протокол IPv6* и *Модули ядра подсистемы Netfilter*.
+### Предварительные требования
+
+1. **Роутер Keenetic** с USB/NAND-накопителем и установленным **Entware (opkg)**.
+   [Инструкция по установке Entware →](https://github.com/Entware/Entware/wiki)
+
+2. **Компоненты прошивки** (ставятся через веб-интерфейс Keenetic →
+   *Общие настройки* → *Параметры компонентов*):
+   - **Протокол IPv6** — нужен, чтобы Xray мог подключаться к серверам,
+     резолвящимся в IPv6 (часто встречается у европейских VPN-провайдеров;
+     без него IPv6-only серверы недоступны).
+   - **Модули ядра подсистемы Netfilter** — нужны для TPROXY-захвата и
+     kill-switch (дают `xt_TPROXY`, `xt_socket`, `xt_conntrack`, `xt_mark`).
+
+3. **Пакеты Entware** (на роутере через SSH):
+   ```sh
+   opkg update
+   opkg install curl           # скачивание (авто-ставится установщиком)
+   opkg install ip-full        # полноценный iproute2 (предпочтительно для policy-routing)
+   ```
+   Установщик сам поставит `curl`, если его нет. `ip-full` опционален, но
+   рекомендуется — без него keen-manager переключается на ограниченный
+   системный `ip` (часть функций policy-маршрутизации может не работать).
+
+4. **Управляемые компоненты** (keen-manager управляет ими, но не включает в бинарь):
+
+   | Компонент | Что делает | Как установить |
+   |-----------|-----------|----------------|
+   | **xray-core** | VLESS/Reality/VMess/Trojan/SS VPN-туннель | Авто-скачивается keen-manager при первой активации (с GitHub). Если DPI провайдера режет CDN GitHub, см. [Оффлайн-установка xray](#xray-не-запускается-exec-format-error). |
+   | **nfqws2** | Обход DPI (стратегийная манипуляция пакетами) | Ставится отдельно: см. [`nfqws2-keenetic`](https://github.com/nfqws/nfqws2-keenetic). keen-manager находит и управляет им, если установлен. |
+   | **tpws** | Прокси десинхронизации сокетов для маршрутизируемого обхода DPI | `opkg install tpws` — нужен только если хочешь routable ProxyN exit point на странице *Bypass*. Без него nfqws2 работает; tpws нужен для per-domain маршрутизации через управляемый прокси-интерфейс. |
+   | **AmneziaWG** | WireGuard-based VPN с обфускацией | На прошивке 5.1.0+ используются нативные модули ядра AWG2 (авто-детект). На старой прошивке — `awg-quick` из Entware. |
 
 Есть два способа. **Способ A** — одной строкой. **Способ B** нужен, когда роутер
 не может достучаться до CDN релизов GitHub — некоторые провайдеры сбрасывают
@@ -493,7 +592,7 @@ curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scrip
    # бинарь под свою архитектуру (показан arm64). Бета — это pre-release, поэтому
    # ярлык 'latest/download' пока НЕ срабатывает — возьми самый свежий тег со
    # страницы Releases: https://github.com/miroslavrov/keen-manager/releases
-   TAG=v0.1.0-beta.10   # ← замени на самый свежий тег оттуда
+   TAG=v0.1.0-rc.10   # ← замени на самый свежий тег со страницы Releases
    curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/${TAG}/keen-manager-arm64.gz"
    ```
 
@@ -617,6 +716,41 @@ opkg update && opkg install --force-reinstall ip-full   # ставит /opt/sbin
 компонент Proxy-клиента KeeneticOS); прозрачный прокси и kill-switch по умолчанию
 выключены.
 
+### весь трафик пропал после включения VPN
+
+Если весь роутер потерял интернет (не только VPN) после активации Xray-подключения,
+проверь:
+
+1. **Kill-switch остался включённым после сбоя?** Выполни на роутере:
+   ```sh
+   iptables -L FORWARD -n 2>&1 | grep KEENMGR
+   ```
+   Если видишь `KEENMGR_KILL` — цепочка kill-switch ещё активна. Удали:
+   ```sh
+   iptables -D FORWARD -j KEENMGR_KILL 2>/dev/null
+   iptables -F KEENMGR_KILL 2>/dev/null
+   iptables -X KEENMGR_KILL 2>/dev/null
+   ```
+   Затем выключи kill-switch в keen-manager (Настройки → kill-switch выкл)
+   перед повторной активацией.
+
+2. **TPROXY-правила зависли после неудачной активации?**
+   ```sh
+   iptables -t mangle -D PREROUTING -j KEENMGR_TPROXY 2>/dev/null
+   iptables -t mangle -F KEENMGR_TPROXY 2>/dev/null
+   iptables -t mangle -X KEENMGR_TPROXY 2>/dev/null
+   ip rule del fwmark 0x2333/0x2333 lookup 993 2>/dev/null
+   ip route flush table 993 2>/dev/null
+   ```
+
+3. **Коннектор на паузе?** В веб-интерфейсе проверь, что тумблер коннектора
+   включён. Или через CLI: `keen-manager connector on`.
+
+4. **Гонка ndm при активации?** Если в логе видишь
+   `No chain/target/match by that name` — ndm сбросил iptables прямо во время
+   установки. В rc.10+ это лечится автоматически (retry); на старых сборках —
+   просто повтори активацию.
+
 ### Удаление
 
 Останавливает сервис и удаляет бинарь, init-скрипт и ndm-хук. Конфиг и состояние
@@ -700,6 +834,11 @@ keen-manager под лицензией **MIT** (см. [`LICENSE`](LICENSE)).
 
 - [x] Доделать страницы веб-морды (дашборд, подключения, подписки, обход, фолбек, логи, настройки)
 - [x] Готовые релизные бинари + установщик одной командой
+- [x] TPROXY-захват по каноническому XKeen-набору (conntrack, socket, mark, bypass)
+- [x] ndm netfilter-хук (переустановка маршрутов после смены топологии)
+- [x] Retry при гонке ndm (цепочка пропала во время apply → автоматический retry)
+- [x] Health loop: SOCKS-first проба для активного Xray (работает при сломанном IPv4 TCP)
+- [x] TPROXY verify при активации + в health loop (SOCKS ок → проверка цепочки захвата)
 - [ ] Горячая перезагрузка Xray через gRPC (смена аутбаундов без полного рестарта)
 - [ ] Policy-based маршрутизация по группам устройств (интеграция с fwmark-политиками Keenetic)
 - [ ] Упаковка в IPK + хостинг opkg-фида

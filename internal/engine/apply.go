@@ -647,6 +647,13 @@ func (e *Engine) probeOne(id string) {
 // signal is a TCP ping to the endpoint (cheap, and the thing that goes dark when
 // a server is blocked or its IP rotates). The active connection additionally
 // gets an end-to-end through-tunnel probe.
+//
+// For the ACTIVE Xray connection, the SOCKS-based end-to-end probe is the
+// authoritative signal: a TCPPing to the server's endpoint can fail even when
+// the tunnel is healthy (e.g. nfqws2/ndm intercepts the router's own IPv4 TCP
+// OUTPUT, or the server is reachable only via IPv6). So for the active Xray we
+// probe SOCKS first, and only use TCPPing for a latency number. This prevents
+// the dashboard from showing "down" on a working tunnel.
 func (e *Engine) probeConnection(st model.State, c model.Connection) model.RuntimeStatus {
 	rs := model.RuntimeStatus{
 		ConnID:    c.ID,
@@ -672,6 +679,31 @@ func (e *Engine) probeConnection(st model.State, c model.Connection) model.Runti
 		return e.probeAWG(c, rs)
 	}
 
+	// Active Xray: SOCKS probe is authoritative. TCPPing may fail on the
+	// router itself (ndm/nfqws2 intercepts IPv4 TCP OUTPUT) while the tunnel
+	// works fine via IPv6 or an established connection.
+	if c.Type == model.ConnXray && rs.Active {
+		if e.verifyOnce(c) {
+			rs.Status = model.StatusUp
+			// Best-effort TCPPing for latency only (may fail — that's OK).
+			host, port := endpointHostPort(c)
+			if host != "" && port > 0 {
+				ctx, cancel := context.WithTimeout(e.baseCtx(), 4*time.Second)
+				p := health.TCPPing(ctx, host, port, 4*time.Second)
+				cancel()
+				if p.OK {
+					rs.LatencyMs = p.LatencyMs
+				}
+			}
+			return rs
+		}
+		rs.Status = model.StatusDegraded
+		rs.Message = "tunnel probe failed (SOCKS unreachable)"
+		return rs
+	}
+
+	// Non-active Xray connections: TCPPing is the only probe we can do
+	// without activating them. If it fails, mark as down.
 	host, port := endpointHostPort(c)
 	reachable := false
 	if host != "" && port > 0 {
@@ -686,13 +718,6 @@ func (e *Engine) probeConnection(st model.State, c model.Connection) model.Runti
 	case !reachable:
 		rs.Status = model.StatusDown
 		rs.Message = "endpoint unreachable"
-	case rs.Active:
-		if e.verifyOnce(c) {
-			rs.Status = model.StatusUp
-		} else {
-			rs.Status = model.StatusDegraded
-			rs.Message = "endpoint up but tunnel probe failed"
-		}
 	default:
 		rs.Status = model.StatusUp
 	}
