@@ -60,10 +60,11 @@ func New(p platform.Paths, r *platform.Runner) *Manager {
 	if platform.FileExists(p.Root + "/sbin/iptables") {
 		ipt = p.Root + "/sbin/iptables"
 	}
-	ip := "ip"
-	if platform.FileExists(p.IPBin) {
-		ip = p.IPBin
-	}
+	// Pick a `ip` binary that is actually runnable on this CPU. A present-but-
+	// wrong-arch/corrupt /opt/sbin/ip (the classic Entware "exec format error")
+	// is skipped in favour of the next candidate rather than fataling every
+	// `ip rule add`; ResolveIP falls back to the firmware ip and finally PATH.
+	ip := platform.ResolveIP(p)
 	return &Manager{
 		Runner:     r,
 		IPBin:      ip,

@@ -138,6 +138,14 @@ func New(paths platform.Paths, dryRun bool) (*Engine, error) {
 	e.detectKeenetic()
 	e.logs.appendf("keen-manager %s ready (arch=%s os=%q dry-run=%v)",
 		version.Short(), e.Platform.Arch, e.Platform.OSVersion, dryRun)
+	// One-time, actionable diagnostic: the preferred Entware ip is present but
+	// unrunnable here (wrong arch / corrupt), which is what turns `ip rule add`
+	// into "exec format error". ResolveIP falls back automatically, but tell the
+	// user how to restore full policy-routing support.
+	if platform.IPBinBroken(paths) {
+		e.logs.appendf("ip: %s is present but not runnable on this router (wrong architecture or corrupt) — falling back to %s. For full transparent-proxy routing reinstall iproute2: opkg install --force-reinstall ip-full",
+			paths.IPBin, platform.ResolveIP(paths))
+	}
 	return e, nil
 }
 
@@ -315,10 +323,9 @@ func (e *Engine) detectWAN() WanView {
 // ----- helpers -----
 
 func (e *Engine) ipBin() string {
-	if platform.FileExists(e.Paths.IPBin) {
-		return e.Paths.IPBin
-	}
-	return "ip"
+	// Resolve to an `ip` that actually runs on this CPU; a wrong-arch/corrupt
+	// /opt/sbin/ip is skipped instead of producing "exec format error".
+	return platform.ResolveIP(e.Paths)
 }
 
 // runtimeFor returns a copy of the runtime status for a connection.

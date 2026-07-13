@@ -238,6 +238,25 @@ export KEEN_XRAY_URL="file:///opt/tmp/Xray-linux-arm64-v8a.zip"
 Xray-core release `.zip` or a raw `xray` binary. (`KEEN_XRAY_VERSION` still pins
 the version for the default GitHub download.)
 
+### routing fails ("exec format error" on `ip`)
+
+`routing failed …: ip rule add: … fork/exec /opt/sbin/ip: exec format error`
+means the Entware iproute2 binary at `/opt/sbin/ip` is the wrong CPU architecture
+(or corrupt), so the transparent-proxy policy route can't be installed.
+keen-manager now **detects this without running the binary** (it inspects the ELF
+header) and falls back to the firmware's own `ip` (`/sbin/ip`) automatically,
+logging a one-time hint. To restore the preferred full-featured binary, reinstall
+Entware's iproute2:
+
+```sh
+opkg update && opkg install --force-reinstall ip-full   # provides /opt/sbin/ip
+/opt/etc/init.d/S99keen-manager restart
+```
+
+This only affects the Xray-via-TPROXY fallback (used when the KeeneticOS Proxy
+client component isn't installed); transparent-proxy and kill-switch are opt-in
+and off by default.
+
 ### Uninstall
 
 Stops the service and removes the binary, init script, and ndm hook. Config and
@@ -578,6 +597,25 @@ export KEEN_XRAY_URL="file:///opt/tmp/Xray-linux-arm64-v8a.zip"
 `KEEN_XRAY_URL` принимает `http(s)://` или `file://`-URL, указывающий либо на
 релизный `.zip` Xray-core, либо на «сырой» бинарь `xray`. (`KEEN_XRAY_VERSION`
 по-прежнему пинит версию для стандартной докачки с GitHub.)
+
+### маршрутизация падает («exec format error» на `ip`)
+
+`routing failed …: ip rule add: … fork/exec /opt/sbin/ip: exec format error`
+означает, что бинарь iproute2 в `/opt/sbin/ip` не той архитектуры процессора
+(или битый), поэтому policy-маршрут прозрачного прокси не устанавливается. Теперь
+keen-manager **определяет это, не запуская бинарь** (читает ELF-заголовок), и
+автоматически переключается на системный `ip` (`/sbin/ip`), один раз записав
+подсказку в лог. Чтобы вернуть предпочтительный полнофункциональный бинарь,
+переустанови iproute2 из Entware:
+
+```sh
+opkg update && opkg install --force-reinstall ip-full   # ставит /opt/sbin/ip
+/opt/etc/init.d/S99keen-manager restart
+```
+
+Это затрагивает только резервный путь Xray-через-TPROXY (когда не установлен
+компонент Proxy-клиента KeeneticOS); прозрачный прокси и kill-switch по умолчанию
+выключены.
 
 ### Удаление
 

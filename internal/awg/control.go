@@ -48,10 +48,9 @@ func (c *Controller) awgBin() string {
 }
 
 func (c *Controller) ipBin() string {
-	if platform.FileExists(c.Paths.IPBin) {
-		return c.Paths.IPBin
-	}
-	return "ip"
+	// ResolveIP skips a present-but-unrunnable /opt/sbin/ip (wrong arch/corrupt)
+	// so the manual awg-quick fallback never dies with "exec format error".
+	return platform.ResolveIP(c.Paths)
 }
 
 // WriteConfig validates and writes a tunnel .conf to ConfDir (root-only perms).
