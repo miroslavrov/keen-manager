@@ -91,6 +91,22 @@ func (e *Engine) routeView(st model.State, r model.ServiceRoute) RouteView {
 		return v
 	}
 
+	// Subscription target: the route binds to ALL servers in a subscription.
+	// Resolves to the active member's interface (re-evaluated on activation).
+	if isSubTarget(r.TargetConnID) {
+		subID := subIDFromTarget(r.TargetConnID)
+		v.TargetName = subTargetLabel(st, subID)
+		if iface, ok := e.resolveRouteIface(r); ok {
+			v.TargetIface = iface
+		} else if r.Enabled {
+			v.Note = "activates when any server in this subscription is the active tunnel"
+		}
+		if r.Enabled && !e.dnsRoutingAvailable() {
+			v.Note = "firmware has no native DNS routing (needs KeeneticOS 5.x)"
+		}
+		return v
+	}
+
 	if c, ok := findConn(st, r.TargetConnID); ok {
 		v.TargetName = c.Name
 	}
@@ -155,6 +171,12 @@ func (e *Engine) resolveRouteIface(r model.ServiceRoute) (string, bool) {
 		}
 		return "", false
 	}
+	// Subscription target → resolve to the active member's interface.
+	if isSubTarget(r.TargetConnID) {
+		st := e.store.Get()
+		subID := subIDFromTarget(r.TargetConnID)
+		return e.resolveSubTarget(st, subID)
+	}
 	if e.xrayProxyMode() {
 		st := e.store.Get()
 		if c, ok := findConn(st, r.TargetConnID); ok && c.Type == model.ConnXray {
@@ -183,9 +205,16 @@ func (e *Engine) CreateRoute(name, presetID string, domains, subnets []string, t
 	if targetConnID == "" && targetIface == "" {
 		return RouteView{}, fmt.Errorf("a route needs a target interface or connection")
 	}
-	if targetConnID != "" && targetConnID != bypassTargetID {
+	if targetConnID != "" && !isReservedTarget(targetConnID) {
 		if _, ok := findConn(st, targetConnID); !ok {
 			return RouteView{}, fmt.Errorf("target connection %s not found", targetConnID)
+		}
+	}
+	// Validate subscription target.
+	if isSubTarget(targetConnID) {
+		subID := subIDFromTarget(targetConnID)
+		if _, ok := findSub(st, subID); !ok {
+			return RouteView{}, fmt.Errorf("target subscription %s not found", subID)
 		}
 	}
 
@@ -298,9 +327,15 @@ func (e *Engine) UpdateRoute(id, name string, domains, subnets []string, targetC
 	if targetConnID == "" && targetIface == "" {
 		targetConnID, targetIface = old.TargetConnID, old.TargetIface
 	}
-	if targetConnID != "" && targetConnID != bypassTargetID {
+	if targetConnID != "" && !isReservedTarget(targetConnID) {
 		if _, ok := findConn(st, targetConnID); !ok {
 			return RouteView{}, fmt.Errorf("target connection %s not found", targetConnID)
+		}
+	}
+	if isSubTarget(targetConnID) {
+		subID := subIDFromTarget(targetConnID)
+		if _, ok := findSub(st, subID); !ok {
+			return RouteView{}, fmt.Errorf("target subscription %s not found", subID)
 		}
 	}
 	newName := firstNonEmpty(strings.TrimSpace(name), old.Name)

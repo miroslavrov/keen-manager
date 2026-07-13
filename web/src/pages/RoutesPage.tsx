@@ -6,6 +6,7 @@ import {
   Code2,
   Download,
   Gamepad2,
+  Globe,
   Loader2,
   Network,
   Pencil,
@@ -64,6 +65,7 @@ import type { Preset, RouteEntry } from '@/lib/types'
 function decodeTarget(v: string): { target_conn_id?: string; target_iface?: string } {
   if (v.startsWith('iface:')) return { target_iface: v.slice('iface:'.length) }
   if (v.startsWith('conn:')) return { target_conn_id: v.slice('conn:'.length) }
+  if (v.startsWith('sub:')) return { target_conn_id: 'sub:' + v.slice('sub:'.length) }
   return {}
 }
 
@@ -145,6 +147,13 @@ export function RoutesPage() {
     queryFn: api.bypass,
     refetchInterval: 15000,
   })
+  // Subscriptions: a route can target an entire subscription ("sub:<id>"), so
+  // any server from it (the active one) carries the routed traffic.
+  const { data: subscriptions } = useQuery({
+    queryKey: ['subscriptions'],
+    queryFn: api.subscriptions,
+    refetchInterval: 30000,
+  })
 
   // AmneziaWG connections back a router-native dns-proxy route (via their native
   // WireguardN interface).
@@ -206,12 +215,27 @@ export function RoutesPage() {
     [bypass, t],
   )
 
+  // Subscription targets: route through any server in a subscription.
+  // Encoded as "sub:<id>" — the daemon resolves it to the active member's
+  // interface, re-evaluated on every activate/failover.
+  const subOptions = React.useMemo<TargetOption[]>(
+    () =>
+      (subscriptions ?? [])
+        .filter((s) => s.enabled)
+        .map((s) => ({
+          value: `sub:${s.id}`,
+          label: s.name,
+          hint: `${s.server_count} servers`,
+        })),
+    [subscriptions],
+  )
+
   const allValues = React.useMemo(
     () =>
-      [...connOptions, ...xrayOptions, ...ifaceOptions, ...bypassOptions].map(
+      [...connOptions, ...xrayOptions, ...subOptions, ...ifaceOptions, ...bypassOptions].map(
         (o) => o.value,
       ),
-    [connOptions, xrayOptions, ifaceOptions, bypassOptions],
+    [connOptions, xrayOptions, subOptions, ifaceOptions, bypassOptions],
   )
   const hasTarget = allValues.length > 0
   const [target, setTarget] = React.useState<string>('')
@@ -232,6 +256,7 @@ export function RoutesPage() {
       <TargetPicker
         connOptions={connOptions}
         xrayOptions={xrayOptions}
+        subOptions={subOptions}
         ifaceOptions={ifaceOptions}
         bypassOptions={bypassOptions}
         value={target}
@@ -264,6 +289,7 @@ export function RoutesPage() {
 function TargetPicker({
   connOptions,
   xrayOptions,
+  subOptions,
   ifaceOptions,
   bypassOptions,
   value,
@@ -273,6 +299,7 @@ function TargetPicker({
 }: {
   connOptions: TargetOption[]
   xrayOptions: TargetOption[]
+  subOptions: TargetOption[]
   ifaceOptions: TargetOption[]
   bypassOptions: TargetOption[]
   value: string
@@ -284,6 +311,7 @@ function TargetPicker({
   const hasAny =
     connOptions.length > 0 ||
     xrayOptions.length > 0 ||
+    subOptions.length > 0 ||
     ifaceOptions.length > 0 ||
     bypassOptions.length > 0
   // Native DNS routing only gates the AWG/interface (dns-proxy) path; Xray
@@ -356,6 +384,26 @@ function TargetPicker({
                 </SelectGroup>
               ) : null}
               {(connOptions.length > 0 || xrayOptions.length > 0) &&
+              subOptions.length > 0 ? (
+                <SelectSeparator />
+              ) : null}
+              {subOptions.length > 0 ? (
+                <SelectGroup>
+                  <SelectLabel className="flex items-center gap-1.5">
+                    <Globe className="h-3.5 w-3.5" />
+                    {t('routes.groupSubscriptions')}
+                  </SelectLabel>
+                  {subOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                      {o.hint ? (
+                        <span className="text-muted-foreground"> · {o.hint}</span>
+                      ) : null}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ) : null}
+              {(connOptions.length > 0 || xrayOptions.length > 0 || subOptions.length > 0) &&
               ifaceOptions.length > 0 ? (
                 <SelectSeparator />
               ) : null}

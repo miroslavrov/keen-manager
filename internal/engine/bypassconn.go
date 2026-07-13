@@ -46,6 +46,13 @@ const (
 	// managed DPI-bypass Proxy interface. It is NOT a real connection id — the
 	// route code special-cases it (validation, resolution, labelling).
 	bypassTargetID = "bypass"
+
+	// subTargetPrefix is the reserved Routes target id prefix that binds a
+	// route to ALL servers in a subscription. The target_conn_id is encoded
+	// as "sub:<subscription_id>". Like bypassTargetID, it is NOT a real
+	// connection id — the route code resolves it to the currently-active
+	// member of that subscription (re-evaluated on every activate/failover).
+	subTargetPrefix = "sub:"
 )
 
 // bypassSeedPresets are the default services seeded as bypass routes on first
