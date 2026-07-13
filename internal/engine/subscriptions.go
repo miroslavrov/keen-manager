@@ -152,84 +152,16 @@ func (e *Engine) RefreshSubscription(id string) (SubView, error) {
 		return SubView{}, err
 	}
 
-	// Index existing member connections by a stable endpoint key.
-	existing := map[string]string{} // key -> connID
-	for _, c := range st.Connections {
-		if c.SubscriptionID == id && c.Xray != nil {
-			existing[serverKey(*c.Xray)] = c.ID
-		}
-	}
-
-	seen := map[string]bool{}
-	vaultPuts := map[string]model.Server{}
-	var newServerIDs []string
-	var addConns []model.Connection
+	var vaultPuts map[string]model.Server
+	var removedIDs []string
 	now := time.Now()
 
 	err = e.store.Mutate(func(s *model.State) error {
-		for _, srv := range res.Servers {
-			k := serverKey(srv)
-			if cid, found := existing[k]; found {
-				seen[k] = true
-				srv.ID = cid
-				vaultPuts[cid] = srv
-				for i := range s.Connections {
-					if s.Connections[i].ID == cid {
-						s.Connections[i].Xray = publicServer(&srv)
-						if s.Connections[i].Name == "" {
-							s.Connections[i].Name = serverName(srv)
-						}
-					}
-				}
-				newServerIDs = append(newServerIDs, cid)
-				continue
-			}
-			cid := newID("conn")
-			srv.ID = cid
-			vaultPuts[cid] = srv
-			addConns = append(addConns, model.Connection{
-				ID: cid, Type: model.ConnXray, Name: serverName(srv), Enabled: true,
-				SubscriptionID: id, Xray: publicServer(&srv), CreatedAt: now,
-			})
-			newServerIDs = append(newServerIDs, cid)
-		}
-		s.Connections = append(s.Connections, addConns...)
-
-		// Remove members that vanished from the provider (except the active one,
-		// which we keep so a refresh never kills the live tunnel).
-		var removeIDs []string
-		for k, cid := range existing {
-			if !seen[k] && cid != s.ActiveConnID {
-				removeIDs = append(removeIDs, cid)
-			} else if !seen[k] && cid == s.ActiveConnID {
-				newServerIDs = append(newServerIDs, cid) // keep stale-but-active
-			}
-		}
-		if len(removeIDs) > 0 {
-			rm := map[string]bool{}
-			for _, r := range removeIDs {
-				rm[r] = true
-			}
-			out := s.Connections[:0]
-			for _, c := range s.Connections {
-				if !rm[c.ID] {
-					out = append(out, c)
-				}
-			}
-			s.Connections = out
-			for i := range s.Connections {
-				if rm[s.Connections[i].FallbackTo] {
-					s.Connections[i].FallbackTo = ""
-				}
-			}
-			for _, r := range removeIDs {
-				s.Failover.Chain = removeString(s.Failover.Chain, r)
-			}
-		}
-
+		var serverIDs []string
+		vaultPuts, removedIDs, serverIDs = reconcileSubscriptionMembers(s, id, res.Servers, now)
 		for i := range s.Subscriptions {
 			if s.Subscriptions[i].ID == id {
-				s.Subscriptions[i].ServerIDs = newServerIDs
+				s.Subscriptions[i].ServerIDs = serverIDs
 				s.Subscriptions[i].ServerCount = len(res.Servers)
 				s.Subscriptions[i].Host = res.Host
 				s.Subscriptions[i].UpdateInterval = res.UpdateIntervalHours
@@ -246,16 +178,10 @@ func (e *Engine) RefreshSubscription(id string) (SubView, error) {
 	for cid, srv := range vaultPuts {
 		e.vault.put(cid, srv)
 	}
-	// Drop vault + runtime for connections that were removed.
-	current := map[string]bool{}
-	for _, c := range e.store.Get().Connections {
-		current[c.ID] = true
-	}
-	for k, cid := range existing {
-		if !seen[k] && !current[cid] {
-			e.vault.delete(cid)
-			e.dropRuntime(cid)
-		}
+	// Drop vault + runtime for the connections the reconcile removed.
+	for _, cid := range removedIDs {
+		e.vault.delete(cid)
+		e.dropRuntime(cid)
 	}
 
 	e.Logf("subscription refreshed: %s (%d servers)", sub.Name, len(res.Servers))
@@ -264,6 +190,101 @@ func (e *Engine) RefreshSubscription(id string) (SubView, error) {
 	st = e.store.Get()
 	sv, _ := findSub(st, id)
 	return e.subView(st, sv), nil
+}
+
+// reconcileSubscriptionMembers reconciles subscription subID's member
+// connections against a freshly-fetched server list, in place on s. It is the
+// pure (no network, no device I/O) core of RefreshSubscription, so its central
+// contract is unit-tested directly:
+//
+//   - A fetched server whose endpoint key (address|port|protocol, see serverKey)
+//     matches an existing member KEEPS that member — same connection id AND its
+//     per-connection Enabled flag. So a server the user switched off (e.g. a
+//     home-country node they don't want auto-best to pick) STAYS off across a
+//     refresh, and a refresh never silently re-enables it.
+//   - A fetched server with no matching member is a genuinely new/changed
+//     endpoint: it is added as a fresh, enabled connection (a changed endpoint is
+//     treated as new, so its enabled state resets — which is acceptable).
+//   - A member that vanished from the provider is removed, EXCEPT the active one
+//     (kept, stale, so a refresh never tears down the live tunnel).
+//
+// It returns the vault entries to persist (connID -> server with secrets), the
+// connection ids removed, and the subscription's new ServerIDs order.
+func reconcileSubscriptionMembers(s *model.State, subID string, fetched []model.Server, now time.Time) (vaultPuts map[string]model.Server, removedIDs []string, serverIDs []string) {
+	// Index existing member connections by a stable endpoint key.
+	existing := map[string]string{} // key -> connID
+	for _, c := range s.Connections {
+		if c.SubscriptionID == subID && c.Xray != nil {
+			existing[serverKey(*c.Xray)] = c.ID
+		}
+	}
+
+	seen := map[string]bool{}
+	vaultPuts = map[string]model.Server{}
+	var addConns []model.Connection
+
+	for _, srv := range fetched {
+		k := serverKey(srv)
+		if cid, found := existing[k]; found {
+			// Unchanged endpoint → reuse the connection verbatim. Only the public
+			// Xray fields (and a missing name) are refreshed; Enabled is left
+			// untouched so the user's per-server choice survives the update.
+			seen[k] = true
+			srv.ID = cid
+			vaultPuts[cid] = srv
+			for i := range s.Connections {
+				if s.Connections[i].ID == cid {
+					s.Connections[i].Xray = publicServer(&srv)
+					if s.Connections[i].Name == "" {
+						s.Connections[i].Name = serverName(srv)
+					}
+				}
+			}
+			serverIDs = append(serverIDs, cid)
+			continue
+		}
+		cid := newID("conn")
+		srv.ID = cid
+		vaultPuts[cid] = srv
+		addConns = append(addConns, model.Connection{
+			ID: cid, Type: model.ConnXray, Name: serverName(srv), Enabled: true,
+			SubscriptionID: subID, Xray: publicServer(&srv), CreatedAt: now,
+		})
+		serverIDs = append(serverIDs, cid)
+	}
+	s.Connections = append(s.Connections, addConns...)
+
+	// Remove members that vanished from the provider (except the active one,
+	// which we keep so a refresh never kills the live tunnel).
+	for k, cid := range existing {
+		if !seen[k] && cid != s.ActiveConnID {
+			removedIDs = append(removedIDs, cid)
+		} else if !seen[k] && cid == s.ActiveConnID {
+			serverIDs = append(serverIDs, cid) // keep stale-but-active
+		}
+	}
+	if len(removedIDs) > 0 {
+		rm := map[string]bool{}
+		for _, r := range removedIDs {
+			rm[r] = true
+		}
+		out := s.Connections[:0]
+		for _, c := range s.Connections {
+			if !rm[c.ID] {
+				out = append(out, c)
+			}
+		}
+		s.Connections = out
+		for i := range s.Connections {
+			if rm[s.Connections[i].FallbackTo] {
+				s.Connections[i].FallbackTo = ""
+			}
+		}
+		for _, r := range removedIDs {
+			s.Failover.Chain = removeString(s.Failover.Chain, r)
+		}
+	}
+	return vaultPuts, removedIDs, serverIDs
 }
 
 // DeleteSubscription removes a subscription and all connections created from it.
@@ -347,6 +368,13 @@ func (e *Engine) UpdateSubscription(id string, fields map[string]any) (SubView, 
 	if v, ok := fields["enabled"].(bool); ok && sub.Enabled && !v {
 		disabling = true
 	}
+	// Detect an auto-select-best OFF->ON transition so it can be applied right
+	// away instead of the user waiting up to AutoSelectIntervalMin for the next
+	// scheduled tick.
+	enablingAuto := false
+	if v, ok := fields["auto_select_best"].(bool); ok && !sub.AutoSelectBest && v {
+		enablingAuto = true
+	}
 	var toDown *model.Connection
 	if disabling && st.ActiveConnID != "" {
 		if c, ok := findConn(st, st.ActiveConnID); ok && c.SubscriptionID == id {
@@ -400,6 +428,14 @@ func (e *Engine) UpdateSubscription(id string, fields map[string]any) (SubView, 
 
 	e.Logf("subscription updated: %s", id)
 	e.publishState()
+	// Apply a freshly-enabled auto-best immediately (async, non-blocking).
+	// autoSelectTick is self-guarding: it no-ops in dry-run, when the connector is
+	// paused, or when the active connection is not a member of THIS subscription,
+	// and uses the same hysteresis as the loop — so it migrates to the fastest
+	// ENABLED server only when that is a meaningful win, never a pointless switch.
+	if enablingAuto && !e.runner.DryRun {
+		go e.autoSelectTick()
+	}
 	st = e.store.Get()
 	sv, _ := findSub(st, id)
 	return e.subView(st, sv), nil
@@ -421,9 +457,15 @@ func (e *Engine) SubscriptionServers(id string) []ServerView {
 			Port:     c.Xray.Port,
 			Protocol: protocolLabel(*c.Xray),
 			Active:   st.ActiveConnID == c.ID,
+			Enabled:  c.Enabled,
 			Status:   string(model.StatusChecking),
 		}
-		if rs, ok := e.runtimeFor(c.ID); ok {
+		// A server the user switched off (or whose subscription stream is off) is
+		// out of the auto-best / select-best pool — surface it as disabled so the
+		// card shows exactly which servers auto-best will and won't consider.
+		if !connEligible(st, c) {
+			sv.Status = string(model.StatusDisabled)
+		} else if rs, ok := e.runtimeFor(c.ID); ok {
 			sv.Status = statusStr(rs.Status)
 			sv.LatencyMs = rs.LatencyMs
 		}
@@ -454,12 +496,7 @@ func (e *Engine) SelectBest(id string) (string, error) {
 	if !sub.Enabled {
 		return "", fmt.Errorf("subscription %q is disabled — enable it first", sub.Name)
 	}
-	var members []model.Connection
-	for _, c := range st.Connections {
-		if c.SubscriptionID == id && c.Enabled {
-			members = append(members, c)
-		}
-	}
+	members := subMembers(st, id)
 	if len(members) == 0 {
 		return "", fmt.Errorf("subscription %q has no enabled servers", sub.Name)
 	}
@@ -611,12 +648,7 @@ func (e *Engine) probeSubscription(id string) {
 	if sub, ok := findSub(st, id); ok && !sub.Enabled {
 		return
 	}
-	var members []model.Connection
-	for _, c := range st.Connections {
-		if c.SubscriptionID == id && c.Enabled {
-			members = append(members, c)
-		}
-	}
+	members := subMembers(st, id)
 	if len(members) > 0 {
 		e.fastest(members)
 		e.publishState()
@@ -671,6 +703,24 @@ func subEnabled(st model.State, subID string) bool {
 // levels — master connector / subscription stream / per-connection — compose.
 func connEligible(st model.State, c model.Connection) bool {
 	return c.Enabled && subEnabled(st, c.SubscriptionID)
+}
+
+// subMembers returns the connections of subscription subID that are currently in
+// the pool for activation / select-best / auto-select-best: the per-server
+// switch (Connection.Enabled) is on AND the subscription stream is on
+// (connEligible). This is the SINGLE predicate select-best, the auto-select loop
+// and the background probe share, so a server the user switched off is uniformly
+// excluded from every "pick the best" path — the whole point of the per-server
+// toggle (drop a home-country node so auto-best never migrates onto it just
+// because its ping is lowest).
+func subMembers(st model.State, subID string) []model.Connection {
+	var out []model.Connection
+	for _, c := range st.Connections {
+		if c.SubscriptionID == subID && connEligible(st, c) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func isoPtr(t *time.Time) string {

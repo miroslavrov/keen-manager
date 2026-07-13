@@ -118,12 +118,10 @@ func (e *Engine) autoSelectTick() {
 		return // no auto-select from a disabled subscription stream
 	}
 
-	var members []model.Connection
-	for _, c := range st.Connections {
-		if c.SubscriptionID == sub.ID && c.Enabled {
-			members = append(members, c)
-		}
-	}
+	// Only ENABLED members are candidates — a server the user switched off (e.g.
+	// a home-country node) is excluded, so auto-best never migrates onto it just
+	// because its latency is lowest.
+	members := subMembers(st, sub.ID)
 	best := e.fastest(members)
 	if best == "" || best == active.ID {
 		return

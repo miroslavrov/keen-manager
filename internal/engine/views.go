@@ -176,6 +176,12 @@ type ServerView struct {
 	LatencyMs int    `json:"latency_ms,omitempty"`
 	Status    string `json:"status"`
 	Active    bool   `json:"active"`
+	// Enabled is this server's per-server pool membership (Connection.Enabled):
+	// whether it participates in activation, select-best and auto-select-best. The
+	// subscription card surfaces it as a per-server switch so a user can drop a
+	// server they don't want (e.g. a home-country node) from the auto-best pool
+	// without leaving the subscription. False = excluded from the pool.
+	Enabled bool `json:"enabled"`
 }
 
 // SubUserInfoView is the quota block some panels return.
