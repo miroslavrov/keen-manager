@@ -57,6 +57,10 @@ export interface Server {
   latency_ms?: number
   status: ConnStatus
   active: boolean
+  /** Per-server pool membership (mirrors the connection's Enabled flag). When
+   * false the server is excluded from activation, select-best and
+   * auto-select-best — the user dropped it from the pool. */
+  enabled: boolean
 }
 
 export interface SubUserInfo {

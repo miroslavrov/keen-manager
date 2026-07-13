@@ -40,7 +40,7 @@ import { useToast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
 import { cn, formatBytes, formatDate, pct, timeAgo } from '@/lib/utils'
 import { useT } from '@/i18n'
-import type { Server, Sub } from '@/lib/types'
+import type { Conn, Server, Sub } from '@/lib/types'
 
 export function SubscriptionsPage() {
   const t = useT()
@@ -236,6 +236,24 @@ function SubscriptionCard({
   const usage = sub.userinfo
   const usedPct = pct(usage?.used_bytes, usage?.total_bytes)
 
+  // Pool counts drive the auto-best panel: how many of this subscription's
+  // servers are currently ENABLED (the pool auto-best / select-best choose
+  // from), and whether one of them is active right now (so auto-best applies
+  // this instant vs. once such a server becomes active). Shares the same
+  // ['connections'] query the Connections page uses (react-query dedupes it).
+  const { data: allConns } = useQuery({
+    queryKey: ['connections'],
+    queryFn: api.connections,
+  })
+  const members = React.useMemo(
+    () => (allConns ?? []).filter((c) => c.subscription_id === sub.id),
+    [allConns, sub.id],
+  )
+  const poolKnown = allConns !== undefined
+  const enabledCount = members.filter((c: Conn) => c.enabled).length
+  const totalCount = members.length
+  const activeFromThisSub = members.some((c: Conn) => c.active)
+
   const autoMutation = useMutation({
     mutationFn: (next: boolean) =>
       api.updateSubscription(sub.id, { auto_select_best: next }),
@@ -355,17 +373,6 @@ function SubscriptionCard({
                 aria-label={t('subscriptions.streamAria')}
               />
             </div>
-            <div className="flex items-center gap-2 rounded-md border border-border/70 px-2.5 py-1">
-              <Switch
-                checked={sub.auto_select_best}
-                disabled={autoMutation.isPending || !sub.enabled}
-                onCheckedChange={(v) => autoMutation.mutate(v)}
-                aria-label={t('subscriptions.autoSelectAria')}
-              />
-              <span className="text-xs text-muted-foreground">
-                {t('subscriptions.autoBest')}
-              </span>
-            </div>
             <Button
               variant="outline"
               size="sm"
@@ -374,7 +381,7 @@ function SubscriptionCard({
               title={
                 !sub.enabled
                   ? t('subscriptions.selectBestDisabledHint')
-                  : undefined
+                  : t('subscriptions.selectBestOnceHint')
               }
               className="gap-1.5"
             >
@@ -407,6 +414,72 @@ function SubscriptionCard({
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
+        </div>
+
+        {/* Auto-select-best — the persistent "keep me on the fastest server"
+            mode, scoped to this subscription's ENABLED servers (the pool the
+            user curates in the servers list below / on the Connections page). */}
+        <div
+          className={cn(
+            'mt-4 flex items-start justify-between gap-3 rounded-md border px-3 py-2.5 transition-colors',
+            sub.auto_select_best && sub.enabled
+              ? 'border-primary/40 bg-primary/5'
+              : 'border-border/70',
+          )}
+        >
+          <div className="flex min-w-0 items-start gap-2.5">
+            <div
+              className={cn(
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-md',
+                sub.auto_select_best && sub.enabled
+                  ? 'bg-primary/15 text-primary'
+                  : 'bg-muted text-muted-foreground',
+              )}
+            >
+              <Gauge className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 space-y-0.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-medium text-foreground">
+                  {t('subscriptions.autoBestTitle')}
+                </p>
+                {poolKnown ? (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                      enabledCount === 0
+                        ? 'bg-warning/15 text-warning'
+                        : 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {enabledCount === 0
+                      ? t('subscriptions.autoBestPoolNone')
+                      : t('subscriptions.autoBestPool', {
+                          enabled: enabledCount,
+                          total: totalCount,
+                        })}
+                  </span>
+                ) : null}
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {t('subscriptions.autoBestHint')}
+              </p>
+              {sub.auto_select_best && sub.enabled ? (
+                <p className="text-[11px] text-muted-foreground">
+                  {activeFromThisSub
+                    ? t('subscriptions.autoBestActiveNow')
+                    : t('subscriptions.autoBestIdleNow')}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <Switch
+            checked={sub.auto_select_best}
+            disabled={autoMutation.isPending || !sub.enabled}
+            onCheckedChange={(v) => autoMutation.mutate(v)}
+            aria-label={t('subscriptions.autoSelectAria')}
+            className="mt-0.5 shrink-0"
+          />
         </div>
 
         {/* Meta grid */}
@@ -522,23 +595,66 @@ function ServersList({ id }: { id: string }) {
 
   return (
     <div className="mt-3 space-y-2">
+      <p className="px-0.5 text-[11px] leading-relaxed text-muted-foreground">
+        {t('subscriptions.poolCaption')}
+      </p>
       {servers.map((server) => (
-        <ServerRow key={server.id} server={server} />
+        <ServerRow key={server.id} server={server} subId={id} />
       ))}
     </div>
   )
 }
 
-function ServerRow({ server }: { server: Server }) {
+function ServerRow({ server, subId }: { server: Server; subId: string }) {
   const t = useT()
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
   const endpoint = `${server.address}:${server.port}`
+
+  // Per-server pool membership. This is the SAME Connection.Enabled flag the
+  // Connections page toggles — surfaced here so the user can drop a server they
+  // don't want (e.g. a home-country node) straight from the subscription, and
+  // auto-best / select-best will skip it. Optimistic so it feels instant.
+  const toggleMutation = useMutation({
+    mutationFn: (next: boolean) =>
+      api.updateConnection(server.id, { enabled: next }),
+    onMutate: (next: boolean) => {
+      const key = ['subscription-servers', subId]
+      const prev = queryClient.getQueryData<Server[]>(key)
+      queryClient.setQueryData<Server[] | undefined>(key, (cur) =>
+        cur?.map((s) => (s.id === server.id ? { ...s, enabled: next } : s)),
+      )
+      return { prev }
+    },
+    onError: (_err, _next, ctx) => {
+      if (ctx?.prev) {
+        queryClient.setQueryData(['subscription-servers', subId], ctx.prev)
+      }
+      toast({ variant: 'error', title: t('subscriptions.serverToggleErrorTitle') })
+    },
+    onSuccess: (updated) => {
+      toast({
+        variant: 'success',
+        title: updated.enabled
+          ? t('subscriptions.serverIncludedTitle')
+          : t('subscriptions.serverExcludedTitle'),
+      })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['subscription-servers', subId] })
+      queryClient.invalidateQueries({ queryKey: ['connections'] })
+      queryClient.invalidateQueries({ queryKey: ['state'] })
+    },
+  })
+
   return (
     <div
       className={cn(
-        'flex items-center gap-3 rounded-md border px-3 py-2.5',
+        'flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors',
         server.active
           ? 'border-primary/40 bg-primary/5'
           : 'border-border/60 bg-card',
+        !server.enabled && 'opacity-60',
       )}
     >
       <StatusDot status={server.status} />
@@ -550,6 +666,11 @@ function ServerRow({ server }: { server: Server }) {
           {server.active ? (
             <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
               {t('common.active')}
+            </span>
+          ) : null}
+          {!server.enabled ? (
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('subscriptions.serverExcluded')}
             </span>
           ) : null}
         </div>
@@ -571,6 +692,13 @@ function ServerRow({ server }: { server: Server }) {
         <LatencyBadge ms={server.latency_ms} />
       </div>
       <StatusBadge status={server.status} className="hidden lg:inline-flex" />
+      <Switch
+        checked={server.enabled}
+        disabled={toggleMutation.isPending}
+        onCheckedChange={(v) => toggleMutation.mutate(v)}
+        aria-label={t('subscriptions.serverEnableAria')}
+        className="shrink-0"
+      />
     </div>
   )
 }

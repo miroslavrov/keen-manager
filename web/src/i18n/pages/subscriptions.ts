@@ -38,7 +38,22 @@ export const subscriptions = {
 
     autoSelectAria: 'Auto-select best server',
     autoBest: 'Auto-best',
-    selectBest: 'Select best',
+    autoBestTitle: 'Auto-select best',
+    autoBestHint:
+      'Keeps you on the fastest ENABLED server in this subscription. Switch off servers you don’t want below — auto-best never picks them.',
+    autoBestPool: '{enabled} of {total} in pool',
+    autoBestPoolNone: 'no servers enabled',
+    autoBestActiveNow: 'Applies now — you’re on a server from this subscription.',
+    autoBestIdleNow: 'Applies once a server from this subscription is active.',
+    selectBest: 'Select best now',
+    selectBestOnceHint: 'One-off jump to the fastest enabled server (auto-best keeps it there).',
+    poolCaption:
+      'Auto-best and “Select best” only choose among enabled servers. A disabled server stays out of the pool and keeps its state across subscription refreshes.',
+    serverExcluded: 'Excluded',
+    serverEnableAria: 'Include or exclude this server from the auto-best pool',
+    serverToggleErrorTitle: 'Could not update server',
+    serverIncludedTitle: 'Server added to the pool',
+    serverExcludedTitle: 'Server excluded from the pool',
     deleteAria: 'Delete subscription',
     copyAddress: 'Copy address',
 
@@ -104,7 +119,22 @@ export const subscriptions = {
 
     autoSelectAria: 'Автовыбор лучшего сервера',
     autoBest: 'Автовыбор',
+    autoBestTitle: 'Автовыбор лучшего',
+    autoBestHint:
+      'Держит на самом быстром из ВКЛючённых серверов подписки. Выключи ненужные ниже — автовыбор их не тронет.',
+    autoBestPool: '{enabled} из {total} в пуле',
+    autoBestPoolNone: 'нет включённых серверов',
+    autoBestActiveNow: 'Действует сейчас — активен сервер из этой подписки.',
+    autoBestIdleNow: 'Начнёт действовать, когда активным станет сервер этой подписки.',
     selectBest: 'Выбрать лучший',
+    selectBestOnceHint: 'Разовый переход на самый быстрый из включённых (автовыбор потом держит его).',
+    poolCaption:
+      'Автовыбор и «Выбрать лучший» берут только включённые серверы. Выключенный сервер остаётся вне пула и сохраняет состояние при обновлении подписки.',
+    serverExcluded: 'Исключён',
+    serverEnableAria: 'Включить или исключить сервер из пула автовыбора',
+    serverToggleErrorTitle: 'Не удалось изменить сервер',
+    serverIncludedTitle: 'Сервер добавлен в пул',
+    serverExcludedTitle: 'Сервер исключён из пула',
     deleteAria: 'Удалить подписку',
     copyAddress: 'Скопировать адрес',
 

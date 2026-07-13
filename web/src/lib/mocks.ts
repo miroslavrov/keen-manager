@@ -303,6 +303,7 @@ export const mockServers: Record<string, Server[]> = {
       latency_ms: 68,
       status: 'up',
       active: true,
+      enabled: true,
     },
     {
       id: 'ol-fi-hel',
@@ -314,6 +315,7 @@ export const mockServers: Record<string, Server[]> = {
       latency_ms: 74,
       status: 'up',
       active: false,
+      enabled: true,
     },
     {
       id: 'ol-nl-ams',
@@ -325,6 +327,7 @@ export const mockServers: Record<string, Server[]> = {
       latency_ms: 51,
       status: 'up',
       active: false,
+      enabled: true,
     },
     {
       id: 'ol-uk-lon',
@@ -336,6 +339,7 @@ export const mockServers: Record<string, Server[]> = {
       latency_ms: 133,
       status: 'degraded',
       active: false,
+      enabled: true,
     },
     {
       id: 'ol-us-lax',
@@ -345,8 +349,9 @@ export const mockServers: Record<string, Server[]> = {
       port: 443,
       protocol: 'vless-reality',
       latency_ms: 214,
-      status: 'up',
+      status: 'disabled',
       active: false,
+      enabled: false,
     },
   ],
   'sub-skyroute': [
@@ -360,6 +365,7 @@ export const mockServers: Record<string, Server[]> = {
       latency_ms: undefined,
       status: 'down',
       active: false,
+      enabled: true,
     },
     {
       id: 'sr-sg-sin',
@@ -371,6 +377,7 @@ export const mockServers: Record<string, Server[]> = {
       latency_ms: 246,
       status: 'up',
       active: true,
+      enabled: true,
     },
     {
       id: 'sr-jp-tok',
@@ -382,6 +389,7 @@ export const mockServers: Record<string, Server[]> = {
       latency_ms: 198,
       status: 'up',
       active: false,
+      enabled: true,
     },
   ],
 }
