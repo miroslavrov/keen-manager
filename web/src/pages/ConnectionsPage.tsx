@@ -15,6 +15,7 @@ import {
   Radio,
   Signal,
   Trash2,
+  Upload,
   Waypoints,
 } from 'lucide-react'
 
@@ -434,13 +435,37 @@ function AddConnectionDialog({
   const [name, setName] = React.useState('')
   const [awgConf, setAwgConf] = React.useState('')
   const [shareLink, setShareLink] = React.useState('')
+  const [fileName, setFileName] = React.useState<string | null>(null)
+  const [dragActive, setDragActive] = React.useState(false)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   const reset = () => {
     setType('awg')
     setName('')
     setAwgConf('')
     setShareLink('')
+    setFileName(null)
+    setDragActive(false)
   }
+
+  // Read a dropped/picked AmneziaWG .conf into the config field so a tunnel can
+  // be added from a file, not only by pasting. The text takes the identical
+  // server-side parse path as a paste, so no API change is needed.
+  const loadAwgFile = React.useCallback(
+    async (file: File | undefined | null) => {
+      if (!file) return
+      try {
+        const text = await file.text()
+        setAwgConf(text)
+        setFileName(file.name)
+        // Prefill the name from the file stem when the user hasn't typed one.
+        setName((prev) => (prev.trim() ? prev : file.name.replace(/\.conf$/i, '')))
+      } catch {
+        toast({ variant: 'error', title: t('connections.fileReadError') })
+      }
+    },
+    [t, toast],
+  )
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -501,22 +526,74 @@ function AddConnectionDialog({
             </TabsList>
 
             <TabsContent value="awg" className="space-y-2">
-              <Label htmlFor="awg-conf">{t('connections.configLabel')}</Label>
-              <Textarea
-                id="awg-conf"
-                value={awgConf}
-                onChange={(e) => setAwgConf(e.target.value)}
-                placeholder={
-                  '[Interface]\nPrivateKey = …\nAddress = 10.13.13.2/32\n\n[Peer]\nPublicKey = …\nEndpoint = host:51820\nAllowedIPs = 0.0.0.0/0'
-                }
-                className="min-h-[220px] font-mono text-xs leading-relaxed"
-                spellCheck={false}
-              />
-              <p className="text-xs text-muted-foreground">
-                {t('connections.configHintBefore')}{' '}
-                <span className="font-mono">.conf</span>
-                {t('connections.configHintAfter')}
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="awg-conf">{t('connections.configLabel')}</Label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".conf,.txt,text/plain"
+                  className="hidden"
+                  onChange={(e) => {
+                    void loadAwgFile(e.target.files?.[0])
+                    // Clear so re-picking the same file fires onChange again.
+                    e.target.value = ''
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  {t('connections.loadFile')}
+                </Button>
+              </div>
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setDragActive(true)
+                }}
+                onDragLeave={() => setDragActive(false)}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragActive(false)
+                  void loadAwgFile(e.dataTransfer.files?.[0])
+                }}
+                className={cn(
+                  'rounded-md transition-colors',
+                  dragActive &&
+                    'ring-2 ring-primary ring-offset-2 ring-offset-background',
+                )}
+              >
+                <Textarea
+                  id="awg-conf"
+                  value={awgConf}
+                  onChange={(e) => {
+                    setAwgConf(e.target.value)
+                    if (fileName) setFileName(null)
+                  }}
+                  placeholder={
+                    '[Interface]\nPrivateKey = …\nAddress = 10.13.13.2/32\n\n[Peer]\nPublicKey = …\nEndpoint = host:51820\nAllowedIPs = 0.0.0.0/0'
+                  }
+                  className="min-h-[220px] font-mono text-xs leading-relaxed"
+                  spellCheck={false}
+                />
+              </div>
+              {fileName ? (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Upload className="h-3 w-3 shrink-0" />
+                  {t('connections.fileLoaded', { file: fileName })}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {t('connections.configHintBefore')}{' '}
+                  <span className="font-mono">.conf</span>
+                  {t('connections.configHintAfter')}{' '}
+                  {t('connections.orDropFile')}
+                </p>
+              )}
             </TabsContent>
 
             <TabsContent value="xray" className="space-y-2">

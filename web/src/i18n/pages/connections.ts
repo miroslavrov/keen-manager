@@ -37,6 +37,10 @@ export const connections = {
     configHintBefore: 'Paste the full',
     configHintAfter:
       ' including the AmneziaWG junk parameters (Jc, S1, S2, H1…).',
+    loadFile: 'Load from file',
+    fileLoaded: 'Loaded {file}',
+    orDropFile: 'You can also drop a .conf file here.',
+    fileReadError: 'Could not read that file',
     shareLink: 'Share link',
     shareLinkHint: 'Supports VLESS, VMess, Trojan and Shadowsocks URIs.',
     added: 'Connection added',
@@ -100,6 +104,10 @@ export const connections = {
     configHintBefore: 'Вставь полный',
     configHintAfter:
       ', включая мусорные параметры AmneziaWG (Jc, S1, S2, H1…).',
+    loadFile: 'Загрузить из файла',
+    fileLoaded: 'Загружен {file}',
+    orDropFile: 'Также можно перетащить сюда файл .conf.',
+    fileReadError: 'Не удалось прочитать файл',
     shareLink: 'Share-ссылка',
     shareLinkHint: 'Поддерживаются URI VLESS, VMess, Trojan и Shadowsocks.',
     added: 'Подключение добавлено',
