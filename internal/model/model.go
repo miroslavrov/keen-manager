@@ -308,6 +308,13 @@ type Settings struct {
 	// Tunable on the Settings page (DefaultXrayMSS is the suggested value); the
 	// diagnostic script's PMTU probe measures the real value to use.
 	XrayMSSClamp int `json:"xray_mss_clamp,omitempty"`
+
+	// AutoUpdateIntervalHours controls the background self-update check.
+	// 0 (default) = off — no automatic update. A positive value (e.g. 24)
+	// means: check GitHub for a newer release every N hours, and if found,
+	// download + verify + atomic-replace + restart. The update only proceeds
+	// when no VPN connection is active (to avoid interrupting a tunnel).
+	AutoUpdateIntervalHours int `json:"auto_update_interval_hours,omitempty"`
 }
 
 // DefaultXrayMSS is the MSS the Settings UI suggests when a user chooses to turn

@@ -359,6 +359,8 @@ export interface Settings {
    * per-ISP override for "handshake OK but no payload" on reduced-MTU / TSPU
    * WANs; XKeen never clamps, so keen-manager leaves it off unless set. */
   xray_mss_clamp: number
+  /** Background self-update check interval in hours. 0 = off (default). */
+  auto_update_interval_hours: number
   platform: Platform
 }
 

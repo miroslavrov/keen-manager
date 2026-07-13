@@ -9,7 +9,7 @@ keen-manager brings **AmneziaWG**, **Xray** (with subscription support), and
 with automatic best-location selection, health checks, and **fallback chains** so
 your connection stays up even when a server is blocked or an operator rotates IPs.
 
-> **Status: beta (rc.10).** The full stack is implemented and ships as a single
+> **Status: v0.1.0.** The full stack is implemented and ships as a single
 > self-contained binary: the Go core (subscription parsing, Xray config
 > generation, AWG config handling, health & failover logic), the daemon
 > (REST/JSON API + SSE + embedded web UI), the CLI, and all seven web UI pages.
@@ -164,7 +164,7 @@ machine that *can* reach GitHub (e.g. behind a VPN), then copy them across.
    # matching binary (arm64 shown — swap for your arch). Betas are pre-releases,
    # so the 'latest/download' shortcut does NOT resolve yet — grab the newest tag
    # from the Releases page: https://github.com/miroslavrov/keen-manager/releases
-   TAG=v0.1.0-rc.10   # ← replace with the newest tag from the Releases page
+   TAG=v0.1.0   # ← replace with the newest tag from the Releases page
    curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/${TAG}/keen-manager-arm64.gz"
    ```
 
@@ -232,10 +232,10 @@ the opkg-native install path (alternative to the shell installer):
 
 ```sh
 # 1. Download the IPK for your arch (arm64 shown — see the table in Method B)
-curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/v0.1.0-rc.12/keen-manager_0.1.0-rc.12_aarch64.ipk"
+curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/v0.1.0/keen-manager_0.1.0_aarch64.ipk"
 
 # 2. Install
-opkg install keen-manager_0.1.0-rc.12_aarch64.ipk
+opkg install keen-manager_0.1.0_aarch64.ipk
 
 # 3. The postinst script starts the service automatically.
 #    Web UI: http://<router-ip>:47115
@@ -444,7 +444,7 @@ their own upstreams, under their own terms): the `nfqws2` daemon
 - [x] gRPC hot-reload (`Controller.HotReload` — swap outbounds via `xray api`, no restart)
 - [x] IPK packaging + opkg feed support (`.ipk` packages published per release)
 - [x] On-device integration tests (`keen-manager integration-test` — activate, verify, pause/resume, reapply)
-- [ ] Auto-update on a schedule (periodic background check + notify)
+- [x] Auto-update on a schedule (background check every N hours, skips when VPN active)
 
 ## Disclaimer
 
@@ -467,7 +467,7 @@ keen-manager объединяет **AmneziaWG**, **Xray** (с поддержко
 **цепочками фолбека**, чтобы соединение оставалось живым, даже когда сервер
 блокируют или оператор меняет IP-адреса.
 
-> **Статус: бета (rc.10).** Весь стек реализован и поставляется одним
+> **Статус: v0.1.0.** Весь стек реализован и поставляется одним
 > самодостаточным бинарём: ядро на Go (разбор подписок, генерация конфигов Xray,
 > работа с конфигами AWG, логика health-check и фолбека), демон (REST/JSON API
 > + SSE + встроенная веб-морда), CLI и все семь страниц интерфейса. Готовые
@@ -623,7 +623,7 @@ curl -fsSL https://raw.githubusercontent.com/miroslavrov/keen-manager/main/scrip
    # бинарь под свою архитектуру (показан arm64). Бета — это pre-release, поэтому
    # ярлык 'latest/download' пока НЕ срабатывает — возьми самый свежий тег со
    # страницы Releases: https://github.com/miroslavrov/keen-manager/releases
-   TAG=v0.1.0-rc.10   # ← замени на самый свежий тег со страницы Releases
+   TAG=v0.1.0   # ← замени на самый свежий тег со страницы Releases
    curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/${TAG}/keen-manager-arm64.gz"
    ```
 
@@ -691,10 +691,10 @@ opkg-нативный путь установки (альтернатива ше
 
 ```sh
 # 1. Скачай IPK под свою архитектуру (показан arm64)
-curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/v0.1.0-rc.12/keen-manager_0.1.0-rc.12_aarch64.ipk"
+curl -fsSLO "https://github.com/miroslavrov/keen-manager/releases/download/v0.1.0/keen-manager_0.1.0_aarch64.ipk"
 
 # 2. Установи
-opkg install keen-manager_0.1.0-rc.12_aarch64.ipk
+opkg install keen-manager_0.1.0_aarch64.ipk
 
 # 3. Postinst-скрипт сам запустит сервис.
 #    Веб-интерфейс: http://<IP-роутера>:47115
@@ -904,7 +904,7 @@ keen-manager под лицензией **MIT** (см. [`LICENSE`](LICENSE)).
 - [x] gRPC hot-reload (`Controller.HotReload` — смена аутбаундов через `xray api`, без рестарта)
 - [x] IPK-пакеты + поддержка opkg-фида (`.ipk` файлы публикуются в каждом релизе)
 - [x] Интеграционные тесты на устройстве (`keen-manager integration-test` — активация, проверка, pause/resume, reapply)
-- [ ] Авто-обновление по расписанию (периодическая проверка в фоне + уведомление)
+- [x] Авто-обновление по расписанию (фоновая проверка каждые N часов, пропускает при активном VPN)
 
 ## Отказ от ответственности
 

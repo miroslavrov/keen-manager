@@ -1,19 +1,22 @@
 package engine
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	"github.com/miroslavrov/keen-manager/internal/model"
+	"github.com/miroslavrov/keen-manager/internal/updater"
 )
 
 // startLoops launches the background workers. They exit when the engine context
 // is cancelled (Stop).
 func (e *Engine) startLoops() {
-	e.wg.Add(3)
+	e.wg.Add(4)
 	go e.healthFailoverLoop()
 	go e.autoSelectLoop()
 	go e.subRefreshLoop()
+	go e.autoUpdateLoop()
 	e.Logf("background loops started")
 }
 
@@ -158,4 +161,64 @@ func (e *Engine) refreshDueSubscriptions() {
 			}
 		}
 	}
+}
+
+// autoUpdateLoop periodically checks GitHub for a newer keen-manager release.
+// When a newer version is found AND no VPN connection is active (to avoid
+// interrupting a tunnel), it downloads, verifies, atomically replaces the
+// binary, and restarts the service. Controlled by Settings.AutoUpdateIntervalHours
+// (0 = off, 24 = once a day). The first check happens 5 minutes after startup
+// (not immediately, so a fresh boot doesn't race with other init).
+func (e *Engine) autoUpdateLoop() {
+	defer e.wg.Done()
+	// Initial delay: 5 minutes after daemon start.
+	select {
+	case <-e.ctx.Done():
+		return
+	case <-time.After(5 * time.Minute):
+	}
+	for {
+		hours := e.store.Get().Settings.AutoUpdateIntervalHours
+		if hours <= 0 {
+			// Disabled — sleep an hour and re-check the setting (so the
+			// user can enable it from the UI without restarting the daemon).
+			select {
+			case <-e.ctx.Done():
+				return
+			case <-time.After(1 * time.Hour):
+				continue
+			}
+		}
+		e.autoUpdateTick()
+		wait := time.Duration(hours) * time.Hour
+		select {
+		case <-e.ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+	}
+}
+
+// autoUpdateTick does one check-and-update cycle. It skips the update when a
+// VPN connection is active (to avoid interrupting a tunnel mid-session) — the
+// next tick will retry.
+func (e *Engine) autoUpdateTick() {
+	if e.runner.DryRun {
+		return
+	}
+	// Don't update while a tunnel is active — the restart would interrupt it.
+	st := e.store.Get()
+	if st.ActiveConnID != "" && !st.TunnelPaused {
+		e.Logf("auto-update: skipping (VPN connection active)")
+		return
+	}
+	e.Logf("auto-update: checking for a newer release...")
+	ctx, cancel := context.WithTimeout(e.ctx, 3*time.Minute)
+	defer cancel()
+	msg, err := updater.SelfUpdate(ctx, false)
+	if err != nil {
+		e.Logf("auto-update: %v", err)
+		return
+	}
+	e.Logf("auto-update: %s", msg)
 }

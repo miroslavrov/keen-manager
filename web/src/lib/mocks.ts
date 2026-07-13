@@ -573,6 +573,7 @@ export const mockSettings: Settings = {
   rollback_timeout_s: 90,
   kill_switch_default: false,
   auto_select_interval_min: 30,
+  auto_update_interval_hours: 0,
   xray_integration: 'auto',
   xray_log_level: 'warning',
   xray_mss_clamp: 0,

@@ -47,6 +47,7 @@ interface SettingsForm {
   rollback_timeout_s: number
   kill_switch_default: boolean
   auto_select_interval_min: number
+  auto_update_interval_hours: number
   xray_integration: string
   xray_log_level: string
   xray_mss_clamp: number
@@ -55,6 +56,7 @@ interface SettingsForm {
 type SettingsPayload = Partial<Settings> & {
   password?: string
   auto_select_interval_min?: number
+  auto_update_interval_hours?: number
 }
 
 export function SettingsPage() {
@@ -88,6 +90,7 @@ export function SettingsPage() {
         rollback_timeout_s: settings.rollback_timeout_s,
         kill_switch_default: settings.kill_switch_default,
         auto_select_interval_min: 15,
+        auto_update_interval_hours: settings.auto_update_interval_hours ?? 0,
         xray_integration: settings.xray_integration || 'auto',
         xray_log_level: settings.xray_log_level || 'warning',
         xray_mss_clamp: settings.xray_mss_clamp ?? 0,
@@ -114,6 +117,7 @@ export function SettingsPage() {
         rollback_timeout_s: form.rollback_timeout_s,
         kill_switch_default: form.kill_switch_default,
         auto_select_interval_min: form.auto_select_interval_min,
+        auto_update_interval_hours: form.auto_update_interval_hours,
         xray_integration: form.xray_integration,
         xray_log_level: form.xray_log_level,
         xray_mss_clamp: form.xray_mss_clamp,
@@ -280,6 +284,27 @@ export function SettingsPage() {
                 />
                 <p className="text-xs text-muted-foreground">
                   {t('settings.autoSelectIntervalHint')}
+                </p>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <Label htmlFor="auto-update">
+                  {t('settings.autoUpdateInterval')}
+                </Label>
+                <Input
+                  id="auto-update"
+                  type="number"
+                  min={0}
+                  value={form.auto_update_interval_hours}
+                  onChange={(e) =>
+                    update('auto_update_interval_hours', Number(e.target.value))
+                  }
+                  className="max-w-[160px] tabular-nums"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('settings.autoUpdateIntervalHint')}
                 </p>
               </div>
 

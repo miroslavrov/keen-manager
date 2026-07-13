@@ -22,6 +22,9 @@ export const settings = {
     autoSelectInterval: 'Auto-select interval (minutes)',
     autoSelectIntervalHint:
       'How often to re-pick the fastest server. Set to 0 for manual selection only.',
+    autoUpdateInterval: 'Auto-update interval (hours)',
+    autoUpdateIntervalHint:
+      'Check GitHub for a newer keen-manager release every N hours and self-update. 0 = off. Skips when a VPN is active.',
     killSwitchDefault: 'Kill-switch on by default',
     killSwitchDefaultDesc: 'Engage the kill-switch automatically at daemon startup.',
     xrayIntegration: 'Xray integration',
@@ -95,6 +98,9 @@ export const settings = {
     autoSelectInterval: 'Интервал автовыбора (минуты)',
     autoSelectIntervalHint:
       'Как часто заново выбирать самый быстрый сервер. Укажи 0 для только ручного выбора.',
+    autoUpdateInterval: 'Интервал автообновления (часы)',
+    autoUpdateIntervalHint:
+      'Проверять GitHub на новый релиз keen-manager каждые N часов и самообновляться. 0 = выкл. Пропускает проверку при активном VPN.',
     killSwitchDefault: 'Kill-switch по умолчанию',
     killSwitchDefaultDesc: 'Включать kill-switch автоматически при запуске демона.',
     xrayIntegration: 'Интеграция Xray',

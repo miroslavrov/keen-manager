@@ -109,6 +109,9 @@ func (e *Engine) SaveSettings(fields map[string]any) error {
 			}
 			set.XrayMSSClamp = v
 		}
+		if v, ok := getInt(fields, "auto_update_interval_hours"); ok && v >= 0 {
+			set.AutoUpdateIntervalHours = v
+		}
 
 		// Password / auth handling.
 		if pw, ok := getString(fields, "password"); ok && pw != "" {
